@@ -27,6 +27,10 @@ import {
   Compass,
   Radio,
   Layers,
+  Edit3,
+  Plus,
+  RotateCcw,
+  Trash2,
 } from 'lucide-react';
 
 interface FreeHourRadarProps {
@@ -36,6 +40,7 @@ interface FreeHourRadarProps {
   onOpenAuthModal: () => void;
   onToggleMemberSlot: (memberId: string, slotKey: string) => void;
   onUpdateMemberMeetupZone?: (memberId: string, zoneId: string) => void;
+  onUpdateCampusZones?: (zones: EnpCampusMeetupZone[]) => void;
   onUpdateMemberGps?: (
     memberId: string,
     gps: {
@@ -55,7 +60,7 @@ const INTL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
 const HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 
 // Historic École Nationale Polytechnique (ENP El Harrach, Avenue Hassen Badi / Rue des Frères Oudek)
-const ENP_CAMPUS_CENTER = { lat: 36.72335, lng: 3.14955 };
+const ENP_CAMPUS_CENTER = { lat: 36.72340, lng: 3.15035 };
 
 const MAPS_API_KEY =
   (import.meta.env?.VITE_GOOGLE_MAPS_API_KEY as string) ||
@@ -69,6 +74,7 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
   onOpenAuthModal,
   onToggleMemberSlot,
   onUpdateMemberMeetupZone,
+  onUpdateCampusZones,
   onUpdateMemberGps,
   onChallengeMember,
 }) => {
@@ -78,6 +84,16 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
     currentUser?.id || members[0]?.id || ''
   );
   const [challengeToast, setChallengeToast] = useState<string>('');
+
+  // Interactive Campus Spot Placement State (Admin/Owner)
+  const campusZones = clubConfig.campusZones?.length
+    ? clubConfig.campusZones
+    : ENP_CAMPUS_MEETUP_ZONES;
+  const [isEditingSpots, setIsEditingSpots] = useState<boolean>(false);
+  const [editingSpotId, setEditingSpotId] = useState<string>(
+    campusZones.find((z) => z.id === 'zone-main-gate-oudek')?.id || campusZones[0]?.id || ''
+  );
+  const [newSpotName, setNewSpotName] = useState<string>('');
 
   // Live Browser Geolocation State
   const [gpsWatchStatus, setGpsWatchStatus] = useState<
@@ -95,12 +111,20 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
   useEffect(() => {
     if (!currentUser) {
       setEditMyHoursMode(false);
+      setIsEditingSpots(false);
     } else if (!isAdminOrOwner) {
       setEditingMemberId(currentUser.id);
+      setIsEditingSpots(false);
     } else if (!members.some((m) => m.id === editingMemberId)) {
       setEditingMemberId(currentUser.id || members[0]?.id || '');
     }
   }, [currentUser, isAdminOrOwner, members, editingMemberId]);
+
+  useEffect(() => {
+    if (!campusZones.some((z) => z.id === editingSpotId) && campusZones[0]) {
+      setEditingSpotId(campusZones[0].id);
+    }
+  }, [campusZones, editingSpotId]);
 
   useEffect(() => {
     return () => {
@@ -117,7 +141,60 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
     .padStart(2, '0')}:00 – ${(selHour + 1).toString().padStart(2, '0')}:00`;
 
   const getZoneById = (zoneId?: string): EnpCampusMeetupZone =>
-    ENP_CAMPUS_MEETUP_ZONES.find((z) => z.id === zoneId) || ENP_CAMPUS_MEETUP_ZONES[0];
+    campusZones.find((z) => z.id === zoneId) || campusZones[0] || ENP_CAMPUS_MEETUP_ZONES[0];
+
+  const handleMoveSpot = (zoneId: string, lat: number, lng: number) => {
+    if (!isAdminOrOwner || !onUpdateCampusZones) return;
+    const next = campusZones.map((z) =>
+      z.id === zoneId ? { ...z, lat, lng } : z
+    );
+    onUpdateCampusZones(next);
+    const moved = next.find((z) => z.id === zoneId);
+    if (moved) {
+      setGpsStatusMessage(
+        `Saved ${moved.shortTag} position (${lat.toFixed(5)}, ${lng.toFixed(5)}) for all club members.`
+      );
+    }
+  };
+
+  const handleAddCustomSpot = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isAdminOrOwner || !onUpdateCampusZones) return;
+    const trimmed = newSpotName.trim();
+    if (!trimmed) return;
+    const anchor = getZoneById(editingSpotId);
+    const newId = `zone-custom-${Date.now()}`;
+    const created: EnpCampusMeetupZone = {
+      id: newId,
+      name: trimmed,
+      shortTag: trimmed.slice(0, 28),
+      wing: 'Custom ENP Campus Spot',
+      description: `Custom meetup spot placed by ${currentUser?.name || 'Club Admin'}.`,
+      lat: Number((anchor.lat + 0.00012).toFixed(6)),
+      lng: Number((anchor.lng + 0.00012).toFixed(6)),
+      boardsAvailable: 2,
+    };
+    onUpdateCampusZones([...campusZones, created]);
+    setEditingSpotId(newId);
+    setNewSpotName('');
+    setGpsStatusMessage(`Added "${created.shortTag}" — click anywhere on the map or drag its pin to position it.`);
+  };
+
+  const handleDeleteSpot = (zoneId: string) => {
+    if (!isAdminOrOwner || !onUpdateCampusZones || campusZones.length <= 2) return;
+    const next = campusZones.filter((z) => z.id !== zoneId);
+    onUpdateCampusZones(next);
+    if (editingSpotId === zoneId && next[0]) {
+      setEditingSpotId(next[0].id);
+    }
+  };
+
+  const handleResetDefaultSpots = () => {
+    if (!isAdminOrOwner || !onUpdateCampusZones) return;
+    onUpdateCampusZones(ENP_CAMPUS_MEETUP_ZONES);
+    setEditingSpotId(ENP_CAMPUS_MEETUP_ZONES[0].id);
+    setGpsStatusMessage('Restored default ENP campus spot coordinates.');
+  };
 
   const membersFreeInSlot = members.filter((m) => m.freeSlots.includes(selectedSlot));
 
@@ -137,13 +214,6 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
     setEditMyHoursMode((prev) => !prev);
   };
 
-  const handleCellClick = (slotKey: string) => {
-    setSelectedSlot(slotKey);
-    if (editMyHoursMode && currentUser && editingMember) {
-      onToggleMemberSlot(editingMember.id, slotKey);
-    }
-  };
-
   const handlePingChallenge = (opponent: ClubMember) => {
     if (!currentUser) {
       onOpenAuthModal();
@@ -156,7 +226,14 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
     onChallengeMember(opponent, selectedSlotLabel);
   };
 
-  // Start or stop live browser GPS tracking
+  const handleCellClick = (slotKey: string) => {
+    setSelectedSlot(slotKey);
+    if (editMyHoursMode && currentUser && editingMember) {
+      onToggleMemberSlot(editingMember.id, slotKey);
+    }
+  };
+
+  // Start or stop live browser GPS tracking (with automatic Wi-Fi/Network fallback on desktop timeouts)
   const handleShareLiveGps = () => {
     if (!currentUser) {
       onOpenAuthModal();
@@ -182,13 +259,18 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
       return;
     }
 
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+
     setGpsWatchStatus('requesting');
     setGpsStatusMessage('Requesting exact GPS coordinates from your browser...');
 
-    const onSuccess = (pos: GeolocationPosition) => {
+    const pushPosition = (pos: GeolocationPosition, highAccuracyUsed: boolean) => {
       const lat = Number(pos.coords.latitude.toFixed(6));
       const lng = Number(pos.coords.longitude.toFixed(6));
-      const acc = Math.round(pos.coords.accuracy || 10);
+      const acc = Math.round(pos.coords.accuracy || 25);
       const timeStr = new Date().toLocaleTimeString([], {
         hour: '2-digit',
         minute: '2-digit',
@@ -197,7 +279,7 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
 
       setGpsWatchStatus('tracking');
       setGpsStatusMessage(
-        `Live GPS Active: ${lat}, ${lng} (±${acc}m accuracy · Updated ${timeStr})`
+        `${highAccuracyUsed ? 'Live GPS Active' : 'Wi-Fi / Network Location Active'}: ${lat}, ${lng} (±${acc}m accuracy · Updated ${timeStr})`
       );
       setActiveInfoMarkerId(`member-${currentUser.id}`);
 
@@ -205,13 +287,13 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
         lat,
         lng,
         accuracyMeters: acc,
-        label: `Exact Live GPS (${myZone.shortTag})`,
+        label: `${highAccuracyUsed ? 'Exact Live GPS' : 'Live Location'} (${myZone.shortTag})`,
         isLiveBrowserGps: true,
         updatedAt: timeStr,
       });
     };
 
-    const onError = (err: GeolocationPositionError) => {
+    const failFinal = (err: GeolocationPositionError) => {
       if (watchIdRef.current !== null && 'geolocation' in navigator) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
@@ -219,22 +301,61 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
       setGpsWatchStatus('denied');
       setGpsStatusMessage(
         err.code === 1
-          ? 'Browser blocked location access: click the Lock / Site Settings icon in your address bar, allow Location, then click Retry GPS — or pin your chosen ENP campus spot manually.'
-          : 'GPS signal timed out or unavailable on this device. Click Retry GPS or pin your chosen ENP campus spot manually.'
+          ? 'Browser blocked location access: click the Lock / Site Settings icon in your address bar, allow Location, then click Retry Live GPS — or pin your chosen ENP campus spot manually.'
+          : 'GPS & Wi-Fi location timed out on this device. Click Retry Live GPS or pin your chosen ENP campus spot manually.'
       );
     };
 
-    navigator.geolocation.getCurrentPosition(onSuccess, onError, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0,
-    });
+    const startWatcher = (highAcc: boolean) => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => pushPosition(pos, highAcc),
+        () => {
+          // Keep current active pin if background watch update transiently fails
+        },
+        {
+          enableHighAccuracy: highAcc,
+          maximumAge: highAcc ? 10000 : 30000,
+          timeout: 15000,
+        }
+      );
+    };
 
-    const id = navigator.geolocation.watchPosition(onSuccess, onError, {
-      enableHighAccuracy: true,
-      maximumAge: 5000,
-    });
-    watchIdRef.current = id;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        pushPosition(pos, true);
+        startWatcher(true);
+      },
+      (err) => {
+        if (err.code === 1) {
+          failFinal(err);
+          return;
+        }
+        // Automatically retry using Wi-Fi / IP / browser network geolocation so laptops don't hang on hardware GPS
+        setGpsStatusMessage(
+          'Satellite GPS timed out — switching to fast Wi-Fi / browser location...'
+        );
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            pushPosition(pos, false);
+            startWatcher(false);
+          },
+          failFinal,
+          {
+            enableHighAccuracy: false,
+            timeout: 10000,
+            maximumAge: 60000,
+          }
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 7000,
+        maximumAge: 15000,
+      }
+    );
   };
 
   // Explicit manual spot opt-in when user cannot/chooses not to use hardware GPS
@@ -409,6 +530,21 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {isAdminOrOwner && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingSpots((prev) => !prev)}
+                  className={`h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
+                    isEditingSpots
+                      ? 'bg-[#FF6B00] border-[#FF6B00] text-white shadow-lg shadow-[#FF6B00]/25'
+                      : 'bg-white/8 hover:bg-white/15 border-white/15 text-slate-200'
+                  }`}
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>{isEditingSpots ? 'Done Placing Spots' : 'Place / Move Spots'}</span>
+                </button>
+              )}
+
               {/* Terrain / Satellite / Streets Switcher */}
               <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-[#040B16] border border-white/15">
                 <Layers className="w-3 h-3 text-[#26E6DE] mx-1.5 hidden sm:block" />
@@ -430,16 +566,16 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
 
               {currentUser && (
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] sm:text-[11px] text-slate-400">My Spot:</span>
+                  <span className="text-[10px] sm:text-[11px] text-slate-400 shrink-0">My Spot:</span>
                   <select
                     aria-label="Quick switch my campus meetup zone"
-                    value={currentUser.campusMeetupZoneId || 'zone-jardins-library'}
+                    value={currentUser.campusMeetupZoneId || campusZones[0]?.id || 'zone-jardins-library'}
                     onChange={(e) => {
                       onUpdateMemberMeetupZone?.(currentUser.id, e.target.value);
                     }}
-                    className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg sm:rounded-xl bg-[#040B16] border border-[#26E6DE]/40 text-[11px] sm:text-xs font-bold text-[#26E6DE]"
+                    className="h-8 sm:h-9 px-2.5 py-0 leading-normal rounded-lg sm:rounded-xl bg-[#040B16] border border-[#26E6DE]/40 text-[11px] sm:text-xs font-bold text-[#26E6DE] cursor-pointer"
                   >
-                    {ENP_CAMPUS_MEETUP_ZONES.map((z) => (
+                    {campusZones.map((z) => (
                       <option key={z.id} value={z.id}>
                         {z.shortTag}
                       </option>
@@ -449,6 +585,75 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
               )}
             </div>
           </div>
+
+          {isAdminOrOwner && isEditingSpots && (
+            <div className="px-2.5 sm:px-4 py-2.5 bg-[#0A1930] border-b border-[#FF6B00]/35 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs">
+                <span className="text-[#26E6DE] font-semibold">
+                  Select a spot pill below, then click anywhere on the map (or drag any pin) to move it. Saves automatically for the whole club.
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetDefaultSpots}
+                  className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 text-[10px] sm:text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Reset Defaults
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {campusZones.map((zone) => {
+                  const isActive = editingSpotId === zone.id;
+                  return (
+                    <div
+                      key={zone.id}
+                      className={`inline-flex items-center rounded-lg border text-[10px] sm:text-[11px] font-bold transition-colors ${
+                        isActive
+                          ? 'bg-[#FF6B00] border-[#FF6B00] text-white'
+                          : 'bg-[#061020] border-white/15 text-slate-200 hover:border-[#26E6DE]/50'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setEditingSpotId(zone.id)}
+                        className="px-2 py-1 cursor-pointer"
+                      >
+                        {zone.shortTag}
+                      </button>
+                      {campusZones.length > 2 && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSpot(zone.id)}
+                          aria-label={`Remove ${zone.shortTag}`}
+                          className="pr-1.5 pl-0.5 py-1 opacity-75 hover:opacity-100 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <form onSubmit={handleAddCustomSpot} className="flex flex-wrap items-center gap-1.5">
+                <input
+                  type="text"
+                  value={newSpotName}
+                  onChange={(e) => setNewSpotName(e.target.value)}
+                  placeholder="Add new ENP spot (e.g. Foyer, Cafeteria, Bâtiment B)..."
+                  className="flex-1 min-w-[200px] h-8 px-2.5 rounded-lg bg-[#040B16] border border-white/15 text-[11px] sm:text-xs text-white placeholder:text-slate-500"
+                />
+                <button
+                  type="submit"
+                  className="h-8 px-3 rounded-lg bg-[#26E6DE] hover:bg-[#4FF2EB] text-[#061020] text-[11px] font-extrabold flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Spot
+                </button>
+              </form>
+            </div>
+          )}
 
           <div className="relative w-full h-[300px] sm:h-[460px] bg-[#040B16] overflow-hidden">
             {MAPS_API_KEY ? (
@@ -469,23 +674,75 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
                     gestureHandling="greedy"
                     disableDefaultUI={true}
                     zoomControl={true}
+                    onClick={(ev) => {
+                      if (isEditingSpots && editingSpotId && ev.detail?.latLng) {
+                        handleMoveSpot(
+                          editingSpotId,
+                          Number(ev.detail.latLng.lat.toFixed(6)),
+                          Number(ev.detail.latLng.lng.toFixed(6))
+                        );
+                        return;
+                      }
+                      setActiveInfoMarkerId(null);
+                    }}
                     className="w-full h-full"
                   >
-                    {/* Fixed ENP Campus Meetup Zone Landmarks */}
-                    {ENP_CAMPUS_MEETUP_ZONES.map((zone) => (
-                      <AdvancedMarker
-                        key={zone.id}
-                        position={{ lat: zone.lat, lng: zone.lng }}
-                        title={zone.name}
-                      >
-                        <div className="flex flex-col items-center pointer-events-none">
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#26E6DE] border-2 border-[#061020] shadow" />
-                          <span className="mt-0.5 px-1.5 py-0.5 rounded bg-[#061020]/90 border border-[#26E6DE]/40 text-[9px] font-bold text-slate-100 whitespace-nowrap shadow">
-                            {zone.shortTag}
-                          </span>
-                        </div>
-                      </AdvancedMarker>
-                    ))}
+                    {/* ENP Campus Meetup Zone Landmarks (Draggable in Place / Move Spots mode) */}
+                    {campusZones.map((zone) => {
+                      const isEditingThis = isEditingSpots && editingSpotId === zone.id;
+                      return (
+                        <AdvancedMarker
+                          key={zone.id}
+                          position={{ lat: zone.lat, lng: zone.lng }}
+                          title={zone.name}
+                          draggable={isEditingSpots}
+                          onClick={() => {
+                            if (isEditingSpots) {
+                              setEditingSpotId(zone.id);
+                            }
+                          }}
+                          onDragEnd={(ev) => {
+                            const latLng = ev.latLng;
+                            if (isEditingSpots && latLng) {
+                              const lat =
+                                typeof latLng.lat === 'function' ? latLng.lat() : Number(latLng.lat);
+                              const lng =
+                                typeof latLng.lng === 'function' ? latLng.lng() : Number(latLng.lng);
+                              handleMoveSpot(
+                                zone.id,
+                                Number(lat.toFixed(6)),
+                                Number(lng.toFixed(6))
+                              );
+                            }
+                          }}
+                        >
+                          <div
+                            className={`flex flex-col items-center ${
+                              isEditingSpots ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'
+                            }`}
+                          >
+                            <span
+                              className={`rounded-full border-2 border-[#061020] shadow ${
+                                isEditingThis
+                                  ? 'w-4 h-4 bg-[#FF6B00] ring-2 ring-white'
+                                  : isEditingSpots
+                                  ? 'w-3 h-3 bg-[#26E6DE]'
+                                  : 'w-2.5 h-2.5 bg-[#26E6DE]'
+                              }`}
+                            />
+                            <span
+                              className={`mt-0.5 px-1.5 py-0.5 rounded border text-[9px] font-bold whitespace-nowrap shadow ${
+                                isEditingThis
+                                  ? 'bg-[#FF6B00] border-white text-white'
+                                  : 'bg-[#061020]/90 border-[#26E6DE]/40 text-slate-100'
+                              }`}
+                            >
+                              {zone.shortTag}
+                            </span>
+                          </div>
+                        </AdvancedMarker>
+                      );
+                    })}
                   {memberMapPins.map((pin) => {
                     const markerKey = `member-${pin.member.id}`;
                     const isMe = currentUser?.id === pin.member.id;
@@ -609,10 +866,15 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
                 <CampusLeafletMap
                   center={ENP_CAMPUS_CENTER}
                   layerMode={mapLayerMode}
+                  zones={campusZones}
                   memberPins={memberMapPins}
                   currentUserId={currentUser?.id}
                   activeMarkerId={activeInfoMarkerId}
                   onSelectMarker={setActiveInfoMarkerId}
+                  isEditingSpots={isEditingSpots}
+                  editingSpotId={editingSpotId}
+                  onSelectEditSpot={setEditingSpotId}
+                  onMoveSpot={handleMoveSpot}
                 />
 
                 {/* Top Radar Coordinate Tag */}

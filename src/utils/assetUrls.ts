@@ -60,8 +60,11 @@ export function resolveAssetUrl(url?: string | null, fallback = ''): string {
   const trimmed = (url || '').trim();
   if (!trimmed) return fallback;
 
-  if (trimmed.startsWith('data:image/') || trimmed.startsWith('blob:')) {
+  if (trimmed.startsWith('data:image/')) {
     return trimmed;
+  }
+  if (trimmed.startsWith('blob:')) {
+    return fallback;
   }
 
   // Extract filename cleanly (handles `/src/assets/images/foo.jpg`, `/assets/aistudio/image_xxx.png`, etc.)
@@ -71,11 +74,12 @@ export function resolveAssetUrl(url?: string | null, fallback = ''): string {
     return BUNDLED_ASSET_MAP[fileName];
   }
 
-  // Any leftover unbundled `/src/assets/...` or `/assets/aistudio/...` path should use fallback instead of 404ing
+  // Any leftover unbundled `/src/assets/...`, `/assets/aistudio/...`, or ephemeral Cloud Run preview URL should use fallback
   if (
     trimmed.startsWith('/src/assets/') ||
     trimmed.startsWith('src/assets/') ||
-    trimmed.startsWith('/assets/aistudio/')
+    trimmed.startsWith('/assets/aistudio/') ||
+    trimmed.includes('.run.app/')
   ) {
     return fallback;
   }

@@ -30,6 +30,7 @@
         "customHeroUrl": { "type": "string", "maxLength": 200000 },
         "startingRating": { "type": "number" },
         "weekMode": { "type": "string", "enum": ["algeria_sat_thu", "intl_mon_sat"] },
+        "campusZones": { "type": "array" },
         "createdByUid": { "type": "string", "maxLength": 128 },
         "updatedAt": { "type": "string", "maxLength": 60 }
       },

@@ -35,6 +35,10 @@ import {
   History,
   ArrowRightLeft,
   Download,
+  Mail,
+  Copy,
+  FileSpreadsheet,
+  Wand2,
 } from 'lucide-react';
 
 interface ClubCustomizerSpecProps {
@@ -179,6 +183,32 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
   const [issuingMemberId, setIssuingMemberId] = useState<string | null>(null);
   const [rowPasswords, setRowPasswords] = useState<Record<string, string>>({});
 
+  // Bulk Credential Sheet & School Email Dispatch State (kept strictly in browser session memory)
+  interface CredentialSheetRow {
+    memberId: string;
+    name: string;
+    arabicName: string;
+    department: string;
+    yearLevel: string;
+    username: string;
+    password: string;
+    schoolEmail: string;
+    status: 'provisioned' | 'already_exists' | 'needs_email_pwd_enabled' | 'failed';
+    statusNote?: string;
+  }
+  const [credSheetRows, setCredSheetRows] = useState<CredentialSheetRow[]>([]);
+  const [isBulkGenerating, setIsBulkGenerating] = useState(false);
+  const [bulkProgressText, setBulkProgressText] = useState('');
+  const [authProviderDisabledError, setAuthProviderDisabledError] = useState(false);
+  const [showEmailImporter, setShowEmailImporter] = useState(false);
+  const [emailImportText, setEmailImportText] = useState('');
+  const [clubSiteUrl, setClubSiteUrl] = useState<string>(() => {
+    if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+      return window.location.origin;
+    }
+    return 'https://enp-chess-team-site.vercel.app';
+  });
+
   // Next-Generation Inheritance State
   const currentDesignatedHeir = members.find((m) => m.isDesignatedSuccessor);
   const [selectedHeirId, setSelectedHeirId] = useState<string>(
@@ -241,8 +271,249 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
   };
 
   const generateRandomPasscode = () => {
-    const num = Math.floor(100000 + Math.random() * 900000);
-    return `enp-${num}`;
+    const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    const bytes = new Uint32Array(8);
+    if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+      window.crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = Math.floor(Math.random() * 0xffffffff);
+      }
+    }
+    let token = '';
+    for (let i = 0; i < 6; i++) {
+      token += charset[bytes[i] % charset.length];
+    }
+    return `Enp#${token}`;
+  };
+
+  const buildProfessionalEmailBody = (row: CredentialSheetRow) => {
+    const targetUrl = clubSiteUrl.trim() || 'https://enp-chess-team-site.vercel.app';
+    return [
+      `Bonjour ${row.name},`,
+      '',
+      `Bienvenue sur la plateforme officielle du ${clubConfig.clubName} (${clubConfig.universityName}).`,
+      `Voici vos identifiants personnels pour accéder à votre profil, au Radar des créneaux libres (Free Hours), aux tournois et au chat d'équipe :`,
+      '',
+      `• Lien du site : ${targetUrl}`,
+      `• Nom d'utilisateur (Username) : ${row.username}`,
+      `• Mot de passe (Password) : ${row.password}`,
+      '',
+      `Étapes de connexion :`,
+      `1. Ouvrez le lien ci-dessus et cliquez sur "Member / Admin Sign In".`,
+      `2. Saisissez votre Username (${row.username}) et votre Mot de passe.`,
+      `3. Complétez vos horaires libres (Free Hours) et votre spot sur le campus ENP.`,
+      '',
+      `Cordialement,`,
+      `${currentUser?.name || 'Fethallah'} — Président du ${clubConfig.clubName}`,
+    ].join('\n');
+  };
+
+  const handleBulkGenerateCredentials = async (onlyUnprovisioned: boolean) => {
+    if (!isAdminOrOwner || !onProvisionMemberLogin) {
+      onOpenAuthModal();
+      return;
+    }
+
+    const targets = members.filter(
+      (m) => m.role !== 'owner' && (!onlyUnprovisioned || !m.authUid)
+    );
+    if (targets.length === 0) {
+      setAdminToast('All current members already have active Firebase logins.');
+      return;
+    }
+
+    setIsBulkGenerating(true);
+    setAuthProviderDisabledError(false);
+
+    const existingEmailsByMember = new Map<string, string>(
+      credSheetRows.map((r) => [r.memberId, r.schoolEmail])
+    );
+
+    const nextRows: CredentialSheetRow[] = [...credSheetRows];
+
+    let providerBlocked = false;
+    let provisionedCount = 0;
+
+    for (let i = 0; i < targets.length; i++) {
+      const m = targets[i];
+      setBulkProgressText(`Generating account ${i + 1} / ${targets.length}: ${m.name} (@${m.username})...`);
+
+      const pwd = generateRandomPasscode();
+      const existingEmail = existingEmailsByMember.get(m.id) || '';
+
+      if (providerBlocked) {
+        const idx = nextRows.findIndex((r) => r.memberId === m.id);
+        const draftRow: CredentialSheetRow = {
+          memberId: m.id,
+          name: m.name,
+          arabicName: m.arabicName,
+          department: m.department,
+          yearLevel: m.yearLevel,
+          username: m.username,
+          password: pwd,
+          schoolEmail: existingEmail,
+          status: 'needs_email_pwd_enabled',
+          statusNote: 'Enable Email/Password in Firebase Console, then re-run Generate.',
+        };
+        if (idx >= 0) nextRows[idx] = draftRow;
+        else nextRows.push(draftRow);
+        continue;
+      }
+
+      const res = await onProvisionMemberLogin(m.id, pwd);
+      await new Promise((resolve) => setTimeout(resolve, 140));
+
+      let status: CredentialSheetRow['status'] = 'failed';
+      if (res.ok) {
+        status = 'provisioned';
+        provisionedCount++;
+      } else if (res.errorCode === 'auth/email-already-in-use') {
+        status = 'already_exists';
+      } else if (res.errorCode === 'auth/operation-not-allowed') {
+        status = 'needs_email_pwd_enabled';
+        providerBlocked = true;
+        setAuthProviderDisabledError(true);
+      }
+
+      const row: CredentialSheetRow = {
+        memberId: m.id,
+        name: m.name,
+        arabicName: m.arabicName,
+        department: m.department,
+        yearLevel: m.yearLevel,
+        username: m.username,
+        password: status === 'already_exists' ? '(Already provisioned earlier)' : pwd,
+        schoolEmail: existingEmail,
+        status,
+        statusNote: res.ok ? 'Active Firebase Login' : res.message,
+      };
+
+      const idx = nextRows.findIndex((r) => r.memberId === m.id);
+      if (idx >= 0) nextRows[idx] = row;
+      else nextRows.push(row);
+    }
+
+    setCredSheetRows(nextRows);
+    setBulkProgressText('');
+    setIsBulkGenerating(false);
+
+    if (providerBlocked) {
+      setAdminToast(
+        'Prepared credential sheet draft. Enable Email/Password in Firebase Console → Authentication → Sign-in method, then click Retry Provisioning.'
+      );
+    } else {
+      setAdminToast(
+        `Generated credentials for ${nextRows.length} members (${provisionedCount} new Firebase logins activated). Ready for CSV export & school email.`
+      );
+    }
+  };
+
+  const handleApplyPastedSchoolEmails = () => {
+    const lines = emailImportText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return;
+
+    const extractedEmails: { rawLine: string; email: string; nameHint: string }[] = [];
+    for (const line of lines) {
+      const emailMatch = line.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (emailMatch) {
+        const email = emailMatch[0].toLowerCase();
+        const nameHint = line
+          .replace(emailMatch[0], ' ')
+          .replace(/[,;\t|<>"]/g, ' ')
+          .trim()
+          .toLowerCase();
+        extractedEmails.push({ rawLine: line, email, nameHint });
+      }
+    }
+
+    if (extractedEmails.length === 0) {
+      setAdminToast('No valid email addresses found in the pasted text.');
+      return;
+    }
+
+    let matchedCount = 0;
+    const updatedRows = credSheetRows.map((row) => {
+      const nameTokens = row.name
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((t) => t.length >= 3);
+      const uname = row.username.toLowerCase();
+
+      const found = extractedEmails.find((item) => {
+        if (item.nameHint && (item.nameHint.includes(uname) || nameTokens.some((t) => item.nameHint.includes(t)))) {
+          return true;
+        }
+        const localPart = item.email.split('@')[0];
+        return localPart.includes(uname) || nameTokens.some((t) => localPart.includes(t));
+      });
+
+      if (found) {
+        matchedCount++;
+        return { ...row, schoolEmail: found.email };
+      }
+      return row;
+    });
+
+    setCredSheetRows(updatedRows);
+    setShowEmailImporter(false);
+    setEmailImportText('');
+    setAdminToast(`Auto-matched ${matchedCount} school email(s) to current members.`);
+  };
+
+  const escapeCsvCell = (val: string) => {
+    const safe = /^[=+\-@]/.test(val) ? `'${val}` : val;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
+
+  const handleDownloadCredsCsv = () => {
+    if (credSheetRows.length === 0) return;
+    const headers = [
+      'Full Name',
+      'Arabic Name',
+      'School Mail',
+      'Username',
+      'Password',
+      'Department',
+      'Year Level',
+      'Status',
+      'Login URL',
+      'Professional Email Message',
+    ];
+    const rows = credSheetRows.map((r) => [
+      escapeCsvCell(r.name),
+      escapeCsvCell(r.arabicName),
+      escapeCsvCell(r.schoolEmail),
+      escapeCsvCell(r.username),
+      escapeCsvCell(r.password),
+      escapeCsvCell(r.department),
+      escapeCsvCell(r.yearLevel),
+      escapeCsvCell(r.status === 'provisioned' ? 'Active Login' : r.statusNote || r.status),
+      escapeCsvCell(clubSiteUrl),
+      escapeCsvCell(buildProfessionalEmailBody(r)),
+    ]);
+    const csvContent = '\uFEFF' + [headers.map(escapeCsvCell).join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${clubConfig.clubId}-member-credentials-sheet-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setAdminToast('Downloaded CSV Sheet (Name, School Mail, Username, Password, Email Template). Keep this file private!');
+  };
+
+  const handleCopyCredsTsv = () => {
+    if (credSheetRows.length === 0) return;
+    const header = ['Full Name', 'School Mail', 'Username', 'Password', 'Login URL'].join('\t');
+    const lines = credSheetRows.map((r) =>
+      [r.name, r.schoolEmail, r.username, r.password, clubSiteUrl].join('\t')
+    );
+    navigator.clipboard?.writeText([header, ...lines].join('\n'));
+    setAdminToast('Copied spreadsheet rows (Full Name, School Mail, Username, Password) — paste directly into Excel or Google Sheets.');
   };
 
   const handleCreateAccountSubmit = async (e: React.FormEvent) => {
@@ -823,6 +1094,241 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
                 </select>
               </div>
             </div>
+
+            {/* BULK CREDENTIAL GENERATOR & SCHOOL EMAIL DISPATCH SHEET */}
+            {isAdminOrOwner && onProvisionMemberLogin && (
+              <div className="p-4 rounded-2xl bg-[#061020] border border-[#26E6DE]/35 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-2.5">
+                  <div className="space-y-0.5">
+                    <div className="text-[10px] font-mono-tabular uppercase text-[#26E6DE] font-bold flex items-center gap-1.5">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-[#FF6B00]" />
+                      SCHOOL MAIL CREDENTIAL SHEET GENERATOR (PRIVATE ADMIN SESSION)
+                    </div>
+                    <h4 className="text-sm font-extrabold text-white">
+                      Generate Usernames &amp; Passwords for All Current Members
+                    </h4>
+                    <p className="text-[11px] text-slate-300 leading-snug max-w-2xl">
+                      Creates Firebase login credentials for current students without logins ({members.filter((m) => m.role !== 'owner' && !m.authUid).length} remaining) and builds a downloadable <strong>Mail · Username · Password</strong> sheet to send from your ENP school email.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={isBulkGenerating}
+                      onClick={() => handleBulkGenerateCredentials(true)}
+                      className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-[#FF6B00]/20 cursor-pointer"
+                    >
+                      <Wand2 className="w-3.5 h-3.5" />
+                      <span>
+                        {isBulkGenerating
+                          ? 'Generating...'
+                          : credSheetRows.length > 0
+                          ? 'Generate Missing / Retry'
+                          : 'Generate All Passwords'}
+                      </span>
+                    </button>
+
+                    {credSheetRows.length > 0 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleDownloadCredsCsv}
+                          className="min-h-[36px] px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download Sheet (.csv)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCopyCredsTsv}
+                          className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-[#1E56A0] hover:bg-[#2563EB] text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Sheet</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {bulkProgressText && (
+                  <div className="px-3 py-2 rounded-xl bg-[#1E56A0]/25 border border-[#26E6DE]/35 text-xs font-mono-tabular text-[#26E6DE]">
+                    {bulkProgressText}
+                  </div>
+                )}
+
+                {authProviderDisabledError && (
+                  <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-400/40 text-xs text-amber-100 space-y-1.5">
+                    <div className="font-bold text-amber-300">
+                      Action Required in Firebase Console (1-time toggle):
+                    </div>
+                    <ol className="list-decimal list-inside space-y-0.5 text-[11px] leading-relaxed">
+                      <li>
+                        Open Firebase Console → Project <strong className="font-mono-tabular">lofty-nucleus-xvc14</strong> → <strong>Authentication</strong> → <strong>Sign-in method</strong>.
+                      </li>
+                      <li>
+                        Click <strong>Email/Password</strong>, toggle <strong>Enable</strong> ON, and click <strong>Save</strong>.
+                      </li>
+                      <li>
+                        Come back here and click <strong>Generate Missing / Retry</strong> so all accounts activate in Firebase Auth.
+                      </li>
+                    </ol>
+                  </div>
+                )}
+
+                {credSheetRows.length > 0 && (
+                  <div className="space-y-2.5 pt-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                      <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[220px]">
+                        <span className="text-slate-400 font-semibold shrink-0">Site Link in Email:</span>
+                        <input
+                          type="text"
+                          value={clubSiteUrl}
+                          onChange={(e) => setClubSiteUrl(e.target.value)}
+                          className="flex-1 min-w-[200px] px-2.5 py-1 rounded-lg bg-[#040B16] border border-white/15 font-mono-tabular text-[11px] text-[#26E6DE]"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setShowEmailImporter((v) => !v)}
+                          className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 font-bold cursor-pointer"
+                        >
+                          {showEmailImporter ? 'Close Email Matcher' : 'Paste School Emails'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCredSheetRows([])}
+                          className="px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 font-bold cursor-pointer"
+                        >
+                          Clear Sheet
+                        </button>
+                      </div>
+                    </div>
+
+                    {showEmailImporter && (
+                      <div className="p-2.5 rounded-xl bg-[#040B16] border border-white/15 space-y-2">
+                        <label className="block text-[11px] text-slate-300">
+                          Paste lines from your Google Form CSV (e.g., <span className="font-mono-tabular text-[#26E6DE]">Boureghda Yasser, y.boureghda@g.enp.edu.dz</span> or one email per line) to auto-fill the School Mail column:
+                        </label>
+                        <textarea
+                          rows={4}
+                          value={emailImportText}
+                          onChange={(e) => setEmailImportText(e.target.value)}
+                          placeholder="Paste student names + @g.enp.edu.dz emails here..."
+                          className="w-full p-2 rounded-lg bg-[#061020] border border-white/15 text-[11px] font-mono-tabular text-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleApplyPastedSchoolEmails}
+                          className="px-3 py-1.5 rounded-lg bg-[#26E6DE] text-[#061020] text-[11px] font-extrabold cursor-pointer"
+                        >
+                          Auto-Match Emails to Table
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="overflow-x-auto rounded-xl border border-white/10 max-h-[340px] overflow-y-auto">
+                      <table className="w-full text-left border-collapse text-[11px]">
+                        <thead className="sticky top-0 bg-[#08172E] text-slate-300 border-b border-white/10">
+                          <tr>
+                            <th className="py-2 px-2.5">Member</th>
+                            <th className="py-2 px-2.5">School Mail (Editable)</th>
+                            <th className="py-2 px-2.5">Username</th>
+                            <th className="py-2 px-2.5">Password</th>
+                            <th className="py-2 px-2.5">Auth Status</th>
+                            <th className="py-2 px-2.5 text-right">Send Email</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5 bg-[#040B16]">
+                          {credSheetRows.map((row) => {
+                            const subject = encodeURIComponent(
+                              `${clubConfig.clubName} — Vos identifiants de connexion`
+                            );
+                            const body = encodeURIComponent(buildProfessionalEmailBody(row));
+                            const mailHref = `mailto:${encodeURIComponent(
+                              row.schoolEmail.trim()
+                            )}?subject=${subject}&body=${body}`;
+                            return (
+                              <tr key={row.memberId} className="hover:bg-white/5">
+                                <td className="py-1.5 px-2.5 font-semibold text-white whitespace-nowrap">
+                                  {row.name}
+                                </td>
+                                <td className="py-1.5 px-2">
+                                  <input
+                                    type="email"
+                                    value={row.schoolEmail}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setCredSheetRows((prev) =>
+                                        prev.map((r) =>
+                                          r.memberId === row.memberId
+                                            ? { ...r, schoolEmail: val }
+                                            : r
+                                        )
+                                      );
+                                    }}
+                                    placeholder="student@g.enp.edu.dz"
+                                    className="w-44 px-2 py-1 rounded bg-[#061020] border border-white/15 font-mono-tabular text-[11px] text-white placeholder:text-slate-600"
+                                  />
+                                </td>
+                                <td className="py-1.5 px-2.5 font-mono-tabular font-bold text-[#26E6DE] whitespace-nowrap">
+                                  {row.username}
+                                </td>
+                                <td className="py-1.5 px-2.5 font-mono-tabular font-bold text-[#FF6B00] whitespace-nowrap">
+                                  {row.password}
+                                </td>
+                                <td className="py-1.5 px-2.5 whitespace-nowrap">
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                      row.status === 'provisioned'
+                                        ? 'bg-emerald-500/20 text-emerald-300'
+                                        : row.status === 'already_exists'
+                                        ? 'bg-sky-500/20 text-sky-300'
+                                        : 'bg-amber-500/20 text-amber-300'
+                                    }`}
+                                  >
+                                    {row.status === 'provisioned'
+                                      ? 'Active'
+                                      : row.status === 'already_exists'
+                                      ? 'Existing'
+                                      : 'Pending'}
+                                  </span>
+                                </td>
+                                <td className="py-1.5 px-2.5 text-right whitespace-nowrap">
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard?.writeText(buildProfessionalEmailBody(row));
+                                        setAdminToast(`Copied ready school email message for ${row.name}.`);
+                                      }}
+                                      title="Copy ready email text"
+                                      className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-slate-200 text-[10px] font-bold cursor-pointer"
+                                    >
+                                      Copy Mail
+                                    </button>
+                                    <a
+                                      href={mailHref}
+                                      className="px-2 py-1 rounded bg-[#1E56A0] hover:bg-[#2563EB] text-white text-[10px] font-bold inline-flex items-center gap-1"
+                                    >
+                                      <Mail className="w-3 h-3" />
+                                      Send
+                                    </a>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {issuedCredsBanner && (
               <div className="p-3.5 rounded-xl bg-[#061020] border border-[#26E6DE]/40 space-y-2">

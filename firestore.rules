@@ -68,7 +68,7 @@ service cloud.firestore {
           'clubId', 'clubName', 'subtitleAr', 'universityName', 'city',
           'primaryColor', 'secondaryColor', 'accentColor',
           'customLogoUrl', 'schoolLogoUrl', 'clubBannerUrl', 'customHeroUrl',
-          'startingRating', 'weekMode', 'createdByUid', 'updatedAt'
+          'startingRating', 'weekMode', 'campusZones', 'createdByUid', 'updatedAt'
         ]) &&
         data.clubId == clubId &&
         data.clubName is string && data.clubName.size() >= 2 && data.clubName.size() <= 100 &&
@@ -85,7 +85,8 @@ service cloud.firestore {
         (!('createdByUid' in data) || (data.createdByUid is string && data.createdByUid.size() <= 128)) &&
         (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 60)) &&
         data.startingRating is number && data.startingRating >= 400 && data.startingRating <= 2500 &&
-        data.weekMode in ['algeria_sat_thu', 'intl_mon_sat'];
+        data.weekMode in ['algeria_sat_thu', 'intl_mon_sat'] &&
+        (!('campusZones' in data) || (data.campusZones is list && data.campusZones.size() <= 40));
     }
 
     function isValidMember(data, clubId, memberId) {

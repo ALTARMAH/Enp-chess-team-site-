@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   IMG_ENP_CLUB_LOGO,
   IMG_ENP_CREST_BANNER,
@@ -35,6 +35,11 @@ export const ClubLogoBadge: React.FC<ClubLogoBadgeProps> = ({
   }[size];
 
   const resolvedSrc = resolveAssetUrl(customLogoUrl, IMG_ENP_CLUB_LOGO);
+  const [imgSrc, setImgSrc] = useState<string>(resolvedSrc);
+
+  useEffect(() => {
+    setImgSrc(resolvedSrc);
+  }, [resolvedSrc]);
 
   return (
     <div
@@ -42,9 +47,14 @@ export const ClubLogoBadge: React.FC<ClubLogoBadgeProps> = ({
       title="Official ENP Chess Club Emblem"
     >
       <img
-        src={resolvedSrc}
+        src={imgSrc}
         alt="Official ENP Chess Club Emblem"
         referrerPolicy="no-referrer"
+        onError={() => {
+          if (imgSrc !== IMG_ENP_CLUB_LOGO) {
+            setImgSrc(IMG_ENP_CLUB_LOGO);
+          }
+        }}
         className="w-full h-full object-cover scale-105"
       />
     </div>

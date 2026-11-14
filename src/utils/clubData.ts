@@ -310,92 +310,202 @@ export const ENP_ACADEMIC_DEPARTMENTS_13: string[] = [
 
 export const ENP_CAMPUS_MEETUP_ZONES: EnpCampusMeetupZone[] = [
   {
-    id: 'zone-jardins-library',
-    name: 'Jardins Central & Main Library Courtyard',
-    shortTag: 'Jardins & Library',
-    wing: 'Central Walkway & Library Block',
+    id: 'zone-library',
+    name: 'Bibliothèque Centrale (LIBRARY)',
+    shortTag: 'LIBRARY',
+    wing: 'Bibliothèque Centrale ENP',
     description:
-      'Landscaped courtyards and gardens (jardins) between the central walkway and the Main Library — outdoor & quiet indoor OTB chess tables.',
-    lat: 36.72335,
-    lng: 3.14945,
+      'Bibliothèque Centrale de l’ENP — quiet study courtyard and chess meetup zone.',
+    lat: 36.72288,
+    lng: 3.14922,
+    boardsAvailable: 5,
+  },
+  {
+    id: 'zone-jardins-library',
+    name: 'Library Jardins (Jardins Bibliothèque)',
+    shortTag: 'Library Jardins',
+    wing: 'Jardins beside Bibliothèque Centrale',
+    description:
+      'Outdoor shaded gardens right beside Bibliothèque Centrale for relaxed OTB rapid & blitz games.',
+    lat: 36.72275,
+    lng: 3.14898,
     boardsAvailable: 6,
   },
   {
-    id: 'zone-amphi-1c',
-    name: 'Amphi C / 1C (Preparatory Cycle Department — CPST)',
-    shortTag: 'Amphi C (Prep Cycle)',
-    wing: 'Preparatory Cycle Department (Classes Préparatoires — CPST)',
+    id: 'zone-jardin-central',
+    name: 'Jardin Central Courtyard',
+    shortTag: 'Jardin',
+    wing: 'Central-East Green Courtyard',
     description:
-      'Steps and shaded tables beside Amphi C / 1C in the Preparatory Cycle Department (CPST), ideal for rapid 10+0 and 3+2 blitz games between lectures.',
-    lat: 36.72362,
-    lng: 3.14985,
+      'Central shaded ENP campus garden lawn area.',
+    lat: 36.72379,
+    lng: 3.15046,
     boardsAvailable: 4,
+  },
+  {
+    id: 'zone-amphi-1c',
+    name: 'Amphi C (Grand Amphithéâtre)',
+    shortTag: 'Amphi C',
+    wing: 'Amphi C Building',
+    description:
+      'Iconic fan-shaped Amphi C amphitheater beside Rue des Frères Oudek — rapid 10+0 and 3+2 blitz hub.',
+    lat: 36.72282,
+    lng: 3.15066,
+    boardsAvailable: 4,
+  },
+  {
+    id: 'zone-salles-td',
+    name: 'Les Salles TD (Tutorial Rooms)',
+    shortTag: 'Les Salles TD',
+    wing: 'Central Bâtiment Salles TD',
+    description:
+      'Tutorial classrooms (Les Salles TD) in the central campus wing.',
+    lat: 36.72374,
+    lng: 3.14978,
+    boardsAvailable: 3,
   },
   {
     id: 'zone-club-vic',
     name: 'VIC Local (Vision & Innovation Club)',
     shortTag: 'Local VIC',
-    wing: 'VIC Club Room',
+    wing: 'VIC Office / Eastern Wing',
     description:
-      'Dedicated campus local of Vision & Innovation Club (VIC) where members hang out and play OTB rapid and blitz games.',
-    lat: 36.72312,
-    lng: 3.15008,
+      'Official Vision & Innovation Club (VIC) local on the eastern wing.',
+    lat: 36.72336,
+    lng: 3.15164,
     boardsAvailable: 3,
   },
   {
     id: 'zone-club-cap',
     name: 'CAP Local (Club d’Activités Polyvalentes)',
     shortTag: 'Local CAP',
-    wing: 'CAP Club Room',
+    wing: 'CAP Club Room (North-East Wing)',
     description:
-      'Dedicated campus local of Club d’Activités Polyvalentes (CAP) hosting cultural events and student chess tables.',
-    lat: 36.72294,
-    lng: 3.14972,
+      'Official Club d’Activités Polyvalentes (CAP) local on the north-east wing.',
+    lat: 36.72379,
+    lng: 3.15184,
     boardsAvailable: 3,
   },
   {
     id: 'zone-club-ieee',
     name: 'IEEE ENP Student Branch Local',
-    shortTag: 'Local IEEE ENP',
+    shortTag: 'Local IEEE',
     wing: 'IEEE ENP Room',
     description:
-      'Dedicated campus local of the IEEE ENP Student Branch where Electrical, Electronics & Automatics players meet for games.',
-    lat: 36.72382,
-    lng: 3.14932,
+      'Dedicated campus local of the IEEE ENP Student Branch inside the central-west ENP wing.',
+    lat: 36.72336,
+    lng: 3.14918,
     boardsAvailable: 3,
   },
   {
     id: 'zone-club-enprt',
-    name: 'ENPRT Local (ENP Racing Team — Formula Student)',
-    shortTag: 'Local ENPRT (Formula Student)',
-    wing: 'ENPRT Formula Student Workshop & Local',
+    name: 'ENPRT Local (ENP Racing Team)',
+    shortTag: 'Local ENPRT',
+    wing: 'ENPRT Formula Student Workshop',
     description:
-      'Dedicated campus local and workshop of the ENP Racing Team (ENPRT — Formula Student Team) with boards set up for blitz breaks.',
-    lat: 36.72348,
-    lng: 3.15025,
+      'ENP Racing Team (ENPRT) workshop & local on the western ENP wing.',
+    lat: 36.72309,
+    lng: 3.14888,
+    boardsAvailable: 3,
+  },
+  {
+    id: 'zone-dept-cpst',
+    name: 'Département CPST (Classes Préparatoires)',
+    shortTag: 'CPST Dept',
+    wing: 'CPST Building (East Wing)',
+    description:
+      'Classes Préparatoires (1CP / 2CP) department building on the eastern campus wing.',
+    lat: 36.72355,
+    lng: 3.15188,
+    boardsAvailable: 4,
+  },
+  {
+    id: 'zone-dept-chimie',
+    name: 'Département Génie Chimique (Chimie Dept)',
+    shortTag: 'Chimie Dept',
+    wing: 'North-East Chemical Engineering Wing',
+    description:
+      'Génie Chimique & Génie des Procédés (Chimie) department in the north-east wing.',
+    lat: 36.72423,
+    lng: 3.15125,
+    boardsAvailable: 3,
+  },
+  {
+    id: 'zone-dept-hydraulic',
+    name: 'Département Hydraulique (Hydraulic Dept)',
+    shortTag: 'Hydraulic Dept',
+    wing: 'Central-East Hydraulic Wing',
+    description:
+      'Génie Hydraulique department in the central-east courtyard block.',
+    lat: 36.72358,
+    lng: 3.15054,
+    boardsAvailable: 3,
+  },
+  {
+    id: 'zone-dept-electronic',
+    name: 'Département Électronique (Electronic Dept)',
+    shortTag: 'Electronic Dept',
+    wing: 'Central-East Electronics Wing',
+    description:
+      'Génie Électronique & Automatique wing in the main central-east building.',
+    lat: 36.72310,
+    lng: 3.15035,
+    boardsAvailable: 3,
+  },
+  {
+    id: 'zone-dept-mecanique',
+    name: 'Département Génie Mécanique (Mécanique Dept)',
+    shortTag: 'Dept. Mécanique',
+    wing: 'Eastern Sawtooth Workshops & Labs',
+    description:
+      'Génie Mécanique department & sawtooth workshops on the east side.',
+    lat: 36.72314,
+    lng: 3.15121,
+    boardsAvailable: 3,
+  },
+  {
+    id: 'zone-dept-indus',
+    name: 'Département Génie Industriel (INDUS Dept.)',
+    shortTag: 'INDUS Dept.',
+    wing: 'Industrial Engineering Building',
+    description:
+      'Industrial Engineering Department (Génie Industriel) building in the central block.',
+    lat: 36.72335,
+    lng: 3.14985,
+    boardsAvailable: 3,
+  },
+  {
+    id: 'zone-dept-civil',
+    name: 'Département Génie Civil (Civil Dept.)',
+    shortTag: 'Civil Dept.',
+    wing: 'Génie Civil Wing',
+    description:
+      'Génie Civil department beside Bibliothèque Centrale and the central courtyard.',
+    lat: 36.72288,
+    lng: 3.14965,
     boardsAvailable: 3,
   },
   {
     id: 'zone-main-gate-oudek',
-    name: 'Main Gate (Rue des Frères Oudek) & Admin Parking',
-    shortTag: 'South Gate & Admin',
-    wing: 'Southern Campus Entrance (Rue des Frères Oudek)',
+    name: 'First Gate (Rue des Frères Oudek Entrance)',
+    shortTag: 'First Gate',
+    wing: 'Main South Entrance (Rue des Frères Oudek)',
     description:
-      'Main southern entrance on Rue des Frères Oudek alongside the Administration Building and staff/visitor parking lots.',
-    lat: 36.72225,
-    lng: 3.14895,
+      'Primary ENP entrance on Rue des Frères Oudek.',
+    lat: 36.72265,
+    lng: 3.15005,
     boardsAvailable: 2,
   },
   {
-    id: 'zone-north-depts',
-    name: 'Central & Northern 13 Academic Department Wings',
-    shortTag: '13 Dept Wings (North/Central)',
-    wing: 'Central & Northern Engineering Wings',
+    id: 'zone-second-gate',
+    name: 'Second Gate (Rue Ouled Sidi El-Ch Entrance)',
+    shortTag: 'Second Gate',
+    wing: 'Inner Courtyard Campus Gate',
     description:
-      'Study lounges across the 13 ENP departments (Preparatory, Automatics, Electronics, Electrical, Chemical/GPE, Civil, Environmental, Mechanical, Industrial, Mining, Hydraulic, Metallurgy & Risk Management).',
-    lat: 36.72415,
-    lng: 3.14965,
-    boardsAvailable: 5,
+      'ENP El Harrach inner courtyard gate entrance.',
+    lat: 36.72278,
+    lng: 3.15103,
+    boardsAvailable: 2,
   },
 ];
 
@@ -475,6 +585,7 @@ export interface ClubThemeConfig {
   customHeroUrl: string;
   startingRating: number;
   weekMode: 'algeria_sat_thu' | 'intl_mon_sat';
+  campusZones?: EnpCampusMeetupZone[];
 }
 
 export interface ClubChatMessage {
@@ -1013,7 +1124,7 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     ],
     openings: [],
     freeSlots: [],
-    campusMeetupZoneId: 'zone-north-depts',
+    campusMeetupZoneId: 'zone-dept-chimie',
   },
 
   // 6. Harrat Mohamed Wail — 1 CP, 1200-1600, helpwailto1000, Brings Board: Yes, Coach: Maybe, Organize: Yes
@@ -1197,7 +1308,7 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     ],
     openings: [],
     freeSlots: [],
-    campusMeetupZoneId: 'zone-north-depts',
+    campusMeetupZoneId: 'zone-dept-chimie',
   },
 
   // 10. Houari Ouassim — 2CP, 800-1200, Wasimovv, Brings Board: Yes, Coach: Yes
@@ -1699,7 +1810,7 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     ],
     openings: [],
     freeSlots: [],
-    campusMeetupZoneId: 'zone-north-depts',
+    campusMeetupZoneId: 'zone-dept-chimie',
   },
 
   // 21. Ouzlifi Fatima Zahra — 1CP, 100-800, Brings Board: Yes, Organize: Yes
@@ -1790,7 +1901,7 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     ],
     openings: [],
     freeSlots: [],
-    campusMeetupZoneId: 'zone-north-depts',
+    campusMeetupZoneId: 'zone-dept-chimie',
   },
 
   // 23. Mahamdioua Ala Eddine — 1st year mechanical engineering, 100-800, Mrblunder_Aladdin, Organize: Yes
@@ -1928,7 +2039,7 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     ],
     openings: [],
     freeSlots: [],
-    campusMeetupZoneId: 'zone-north-depts',
+    campusMeetupZoneId: 'zone-dept-chimie',
   },
 
   // 26. Seghir Soumia — 1ere Année cycle préparatoire, 100-800, sou_mia_se, Organize: Yes

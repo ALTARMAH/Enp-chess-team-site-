@@ -634,10 +634,16 @@ export default function App() {
           }
           setIsCloudSynced(true);
 
-          // Automatically upgrade legacy `/src/assets/images/...` paths stored in Firestore when Owner connects
-          if (
+          // Automatically upgrade legacy or dead asset URLs stored in Firestore when Owner connects
+          const hasLegacyAssetUrl =
             matchedActiveRaw &&
-            matchedActiveRaw.customLogoUrl?.startsWith('/src/assets/') &&
+            matchedActive &&
+            (matchedActiveRaw.customLogoUrl !== matchedActive.customLogoUrl ||
+              matchedActiveRaw.schoolLogoUrl !== matchedActive.schoolLogoUrl ||
+              matchedActiveRaw.clubBannerUrl !== matchedActive.clubBannerUrl ||
+              matchedActiveRaw.customHeroUrl !== matchedActive.customHeroUrl);
+          if (
+            hasLegacyAssetUrl &&
             !legacyCloudMigratedRef.current &&
             auth.currentUser?.email?.toLowerCase() === 'fethallah2411@gmail.com' &&
             auth.currentUser.emailVerified
@@ -2522,6 +2528,11 @@ export default function App() {
                     src={resolveAssetUrl(clubConfig.schoolLogoUrl, IMG_ENP_SCHOOL_LOGO)}
                     alt={clubConfig.universityName}
                     referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      if (e.currentTarget.src !== IMG_ENP_SCHOOL_LOGO) {
+                        e.currentTarget.src = IMG_ENP_SCHOOL_LOGO;
+                      }
+                    }}
                     className="w-full h-full object-cover scale-105"
                   />
                 </div>
@@ -2613,7 +2624,7 @@ export default function App() {
                         const found = clubs.find((c) => c.clubId === e.target.value);
                         if (found) setClubConfig(found);
                       }}
-                      className="w-full max-w-full px-2.5 py-2 rounded-xl bg-[#061020] border border-white/15 text-xs font-bold text-white cursor-pointer truncate"
+                      className="w-full max-w-full h-9 px-2.5 py-0 leading-normal rounded-xl bg-[#061020] border border-white/15 text-xs font-bold text-white cursor-pointer"
                     >
                       {clubs.map((c) => (
                         <option key={c.clubId} value={c.clubId}>
@@ -2735,7 +2746,7 @@ export default function App() {
                       const found = clubs.find((c) => c.clubId === e.target.value);
                       if (found) setClubConfig(found);
                     }}
-                    className="min-w-0 max-w-[180px] sm:max-w-[320px] truncate px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-[#061020] border border-white/15 text-[11px] sm:text-xs font-bold text-white cursor-pointer"
+                    className="min-w-0 max-w-[210px] sm:max-w-[340px] h-8 sm:h-9 px-2.5 py-0 leading-normal rounded-lg sm:rounded-xl bg-[#061020] border border-white/15 text-[11px] sm:text-xs font-bold text-white cursor-pointer"
                   >
                     {clubs.map((c) => (
                       <option key={c.clubId} value={c.clubId}>
@@ -2878,6 +2889,11 @@ export default function App() {
                                   src={resolveAssetUrl(clubConfig.schoolLogoUrl, IMG_ENP_SCHOOL_LOGO)}
                                   alt="École Nationale Polytechnique Logo"
                                   referrerPolicy="no-referrer"
+                                  onError={(e) => {
+                                    if (e.currentTarget.src !== IMG_ENP_SCHOOL_LOGO) {
+                                      e.currentTarget.src = IMG_ENP_SCHOOL_LOGO;
+                                    }
+                                  }}
                                   className="w-full h-full object-cover scale-105"
                                 />
                               </div>
@@ -3297,6 +3313,9 @@ export default function App() {
                   onOpenAuthModal={() => setIsAuthModalOpen(true)}
                   onToggleMemberSlot={handleToggleMemberSlot}
                   onUpdateMemberMeetupZone={handleUpdateMemberMeetupZone}
+                  onUpdateCampusZones={(zones) =>
+                    handleUpdateClubConfig({ ...clubConfig, campusZones: zones })
+                  }
                   onUpdateMemberGps={handleUpdateMemberGps}
                   onChallengeMember={(member) => handleOpenPrivateChatWithMember(member.id)}
                 />
@@ -3490,10 +3509,10 @@ export default function App() {
               <div className="p-3 rounded-xl bg-[#061020]/60 border border-white/10 text-[11px] text-slate-300 space-y-1 leading-relaxed">
                 <div className="font-bold text-white flex items-center gap-1.5">
                   <Shield className="w-3.5 h-3.5 text-[#26E6DE]" />
-                  Owner &amp; Verified Google Sign-In
+                  Owner &amp; School Mail / Google Sign-In
                 </div>
                 <p className="text-slate-400">
-                  Club Owner (<span className="font-mono-tabular text-[#26E6DE]">fethallah2411@gmail.com</span>) or students using Google sign in here.
+                  ENP students can sign in directly with their <span className="font-mono-tabular text-[#26E6DE]">@g.enp.edu.dz</span> school email or any Google account (Club Owner: <span className="font-mono-tabular text-[#FF6B00]">fethallah2411@gmail.com</span>).
                 </p>
               </div>
 
@@ -3503,7 +3522,7 @@ export default function App() {
                 className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-[#061020] text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-lg"
               >
                 <LogIn className="w-4 h-4" />
-                <span>Continue with Google Account</span>
+                <span>Continue with Google / ENP School Mail</span>
               </button>
 
               {!currentUser && (

@@ -3,7 +3,6 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
   ClubMember,
-  ENP_CAMPUS_MEETUP_ZONES,
   EnpCampusMeetupZone,
 } from '../utils/clubData';
 import { resolveAssetUrl } from '../utils/assetUrls';
@@ -23,10 +22,15 @@ export interface CampusPinData {
 interface CampusLeafletMapProps {
   center: { lat: number; lng: number };
   layerMode: CampusMapLayerMode;
+  zones: EnpCampusMeetupZone[];
   memberPins: CampusPinData[];
   currentUserId?: string;
   activeMarkerId: string | null;
   onSelectMarker: (markerId: string | null) => void;
+  isEditingSpots?: boolean;
+  editingSpotId?: string | null;
+  onSelectEditSpot?: (zoneId: string) => void;
+  onMoveSpot?: (zoneId: string, lat: number, lng: number) => void;
 }
 
 const TILE_LAYERS: Record<
@@ -62,18 +66,32 @@ function escapeHtml(raw: string): string {
 export const CampusLeafletMap: React.FC<CampusLeafletMapProps> = ({
   center,
   layerMode,
+  zones,
   memberPins,
   currentUserId,
   activeMarkerId,
   onSelectMarker,
+  isEditingSpots = false,
+  editingSpotId = null,
+  onSelectEditSpot,
+  onMoveSpot,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const zonesLayerRef = useRef<L.LayerGroup | null>(null);
   const pinsLayerRef = useRef<L.LayerGroup | null>(null);
+
   const onSelectMarkerRef = useRef(onSelectMarker);
   onSelectMarkerRef.current = onSelectMarker;
+  const isEditingRef = useRef(isEditingSpots);
+  isEditingRef.current = isEditingSpots;
+  const editingSpotIdRef = useRef(editingSpotId);
+  editingSpotIdRef.current = editingSpotId;
+  const onSelectEditSpotRef = useRef(onSelectEditSpot);
+  onSelectEditSpotRef.current = onSelectEditSpot;
+  const onMoveSpotRef = useRef(onMoveSpot);
+  onMoveSpotRef.current = onMoveSpot;
 
   // Initialize Leaflet map instance once
   useEffect(() => {
@@ -96,25 +114,15 @@ export const CampusLeafletMap: React.FC<CampusLeafletMapProps> = ({
     const zonesLayer = L.layerGroup().addTo(map);
     const pinsLayer = L.layerGroup().addTo(map);
 
-    // Render fixed ENP Campus Meetup Zone reference markers
-    ENP_CAMPUS_MEETUP_ZONES.forEach((zone) => {
-      const marker = L.circleMarker([zone.lat, zone.lng], {
-        radius: 5,
-        color: '#26E6DE',
-        weight: 2,
-        fillColor: '#061020',
-        fillOpacity: 0.9,
-      });
-      marker.bindTooltip(escapeHtml(zone.shortTag), {
-        permanent: true,
-        direction: 'bottom',
-        offset: [0, 4],
-        className: 'enp-zone-tooltip',
-      });
-      marker.addTo(zonesLayer);
-    });
-
-    map.on('click', () => {
+    map.on('click', (ev: L.LeafletMouseEvent) => {
+      if (isEditingRef.current && editingSpotIdRef.current && onMoveSpotRef.current) {
+        onMoveSpotRef.current(
+          editingSpotIdRef.current,
+          Number(ev.latlng.lat.toFixed(6)),
+          Number(ev.latlng.lng.toFixed(6))
+        );
+        return;
+      }
       onSelectMarkerRef.current(null);
     });
 
@@ -123,7 +131,6 @@ export const CampusLeafletMap: React.FC<CampusLeafletMapProps> = ({
     zonesLayerRef.current = zonesLayer;
     pinsLayerRef.current = pinsLayer;
 
-    // Force size invalidation after initial mount in responsive container
     const resizeTimer = window.setTimeout(() => {
       map.invalidateSize();
     }, 150);
@@ -153,6 +160,70 @@ export const CampusLeafletMap: React.FC<CampusLeafletMapProps> = ({
     }).addTo(map);
     tileLayerRef.current = nextLayer;
   }, [layerMode]);
+
+  // Sync ENP Campus Meetup Zone landmarks (and draggable placement handles in edit mode)
+  useEffect(() => {
+    const zonesLayer = zonesLayerRef.current;
+    if (!zonesLayer) return;
+
+    zonesLayer.clearLayers();
+
+    zones.forEach((zone) => {
+      if (isEditingSpots) {
+        const isSelected = editingSpotId === zone.id;
+        const badgeColor = isSelected ? '#FF6B00' : '#26E6DE';
+        const label = escapeHtml(zone.shortTag);
+        const icon = L.divIcon({
+          html: `
+            <div style="display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-75%);cursor:grab;">
+              <span style="width:14px;height:14px;border-radius:9999px;background:${badgeColor};border:2.5px solid #061020;box-shadow:0 2px 8px rgba(0,0,0,0.7);"></span>
+              <span style="margin-top:2px;padding:1px 6px;border-radius:5px;background:${
+                isSelected ? '#FF6B00' : 'rgba(6,16,32,0.92)'
+              };border:1px solid ${badgeColor};color:#fff;font-size:10px;font-weight:800;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.6);">
+                ${label}
+              </span>
+            </div>
+          `,
+          className: 'enp-custom-member-pin',
+          iconSize: [0, 0],
+          iconAnchor: [0, 0],
+        });
+
+        const marker = L.marker([zone.lat, zone.lng], {
+          icon,
+          draggable: true,
+        });
+        marker.on('click', (ev) => {
+          L.DomEvent.stopPropagation(ev);
+          onSelectEditSpotRef.current?.(zone.id);
+        });
+        marker.on('dragend', () => {
+          const pos = marker.getLatLng();
+          onMoveSpotRef.current?.(
+            zone.id,
+            Number(pos.lat.toFixed(6)),
+            Number(pos.lng.toFixed(6))
+          );
+        });
+        marker.addTo(zonesLayer);
+      } else {
+        const marker = L.circleMarker([zone.lat, zone.lng], {
+          radius: 5,
+          color: '#26E6DE',
+          weight: 2,
+          fillColor: '#061020',
+          fillOpacity: 0.9,
+        });
+        marker.bindTooltip(escapeHtml(zone.shortTag), {
+          permanent: true,
+          direction: 'bottom',
+          offset: [0, 4],
+          className: 'enp-zone-tooltip',
+        });
+        marker.addTo(zonesLayer);
+      }
+    });
+  }, [zones, isEditingSpots, editingSpotId]);
 
   // Sync live opted-in member avatar markers
   useEffect(() => {
@@ -212,7 +283,7 @@ export const CampusLeafletMap: React.FC<CampusLeafletMapProps> = ({
   }, [memberPins, currentUserId, activeMarkerId]);
 
   return (
-    <div className="relative w-full h-full">
+    <div className={`relative w-full h-full ${isEditingSpots ? 'cursor-crosshair' : ''}`}>
       <div ref={containerRef} className="w-full h-full z-0" />
     </div>
   );
