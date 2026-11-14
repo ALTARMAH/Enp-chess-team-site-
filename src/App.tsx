@@ -7,6 +7,7 @@ import {
   ClubRoleDivision,
   ClubThemeConfig,
   ClubTournament,
+  ENP_CAMPUS_MEETUP_ZONES,
   INITIAL_CHAT_MESSAGES,
   INITIAL_CLUB_POSTS,
   INITIAL_LOGGED_GAMES,
@@ -18,6 +19,8 @@ import {
   MemberLiveStatus,
   UNIVERSITY_PRESETS,
   UserRole,
+  isLiveGpsFresh,
+  resolveLivePresenceStatus,
 } from './utils/clubData';
 import {
   MatchOutcome,
@@ -275,6 +278,13 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
   const isSeedingRef = useRef<boolean>(false);
   const legacyCloudMigratedRef = useRef<boolean>(false);
+  const onlineInitializedForSessionRef = useRef<string | null>(null);
+
+  // Automatic Network & Heartbeat Presence State
+  const [isNetworkOnline, setIsNetworkOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+  const [presenceClockMs, setPresenceClockMs] = useState<number>(() => Date.now());
 
   // Quick Home Post Modal State (for Admins on Overview)
   const [isQuickPostModalOpen, setIsQuickPostModalOpen] = useState<boolean>(false);
@@ -282,11 +292,32 @@ export default function App() {
   const [quickPostCategory, setQuickPostCategory] = useState<ClubPost['category']>('Club News');
   const [quickPostBody, setQuickPostBody] = useState<string>('');
 
-  const currentUser = members.find((m) => m.id === currentUserId) || null;
-  const isAdminOrOwner = currentUser?.role === 'owner' || currentUser?.role === 'admin';
+  const currentUserRaw = members.find((m) => m.id === currentUserId) || null;
+  const currentUserRef = useRef<ClubMember | null>(null);
+  currentUserRef.current = currentUserRaw;
 
-  // Scoped Data for the Active Club
-  const clubMembers = members.filter((m) => m.clubId === clubConfig.clubId);
+  const withResolvedPresence = (m: ClubMember): ClubMember => {
+    const isMeOfflineNow = m.id === currentUserId && !isNetworkOnline;
+    const resolvedStatus = isMeOfflineNow
+      ? 'offline'
+      : resolveLivePresenceStatus(m, presenceClockMs);
+    const gpsFresh =
+      !isMeOfflineNow &&
+      resolvedStatus !== 'offline' &&
+      isLiveGpsFresh(m, presenceClockMs);
+    return {
+      ...m,
+      liveStatus: resolvedStatus,
+      gpsLocation: gpsFresh ? m.gpsLocation : undefined,
+    };
+  };
+
+  // Scoped Data for the Active Club (presence-aware across Dashboard, Directory, Chat & Radar)
+  const clubMembers = members
+    .filter((m) => m.clubId === clubConfig.clubId)
+    .map(withResolvedPresence);
+  const currentUser = currentUserRaw ? withResolvedPresence(currentUserRaw) : null;
+  const isAdminOrOwner = currentUser?.role === 'owner' || currentUser?.role === 'admin';
   const clubGames = loggedGames.filter((g) => g.clubId === clubConfig.clubId);
   const approvedClubGames = clubGames.filter((g) => g.status === 'approved');
   const pendingClubGames = clubGames.filter((g) => g.status === 'pending');
@@ -424,11 +455,108 @@ export default function App() {
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       if (!user) {
+        onlineInitializedForSessionRef.current = null;
         setCurrentUserId(null);
       }
     });
     return () => unsub();
   }, []);
+
+  // --- AUTOMATIC CONNECTION & HEARTBEAT PRESENCE ---
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsNetworkOnline(true);
+      setPresenceClockMs(Date.now());
+    };
+    const handleOffline = () => {
+      setIsNetworkOnline(false);
+      setPresenceClockMs(Date.now());
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    const clockInterval = window.setInterval(() => {
+      setPresenceClockMs(Date.now());
+    }, 30_000);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.clearInterval(clockInterval);
+    };
+  }, []);
+
+  useEffect(() => {
+    const markOfflineBestEffort = () => {
+      const activeMember = currentUserRef.current;
+      if (!auth.currentUser || !activeMember) return;
+      const now = new Date().toISOString();
+      setDoc(
+        doc(db, `clubs/${activeMember.clubId}/members`, activeMember.id),
+        {
+          liveStatus: 'offline',
+          gpsLocation: deleteField(),
+          updatedAt: now,
+        },
+        { merge: true }
+      ).catch(() => {});
+    };
+
+    window.addEventListener('pagehide', markOfflineBestEffort);
+    window.addEventListener('beforeunload', markOfflineBestEffort);
+    return () => {
+      window.removeEventListener('pagehide', markOfflineBestEffort);
+      window.removeEventListener('beforeunload', markOfflineBestEffort);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseUser || !currentUserRaw || !isNetworkOnline) return;
+
+    const sessionKey = `${firebaseUser.uid}:${currentUserRaw.id}`;
+    const isInitialConnect = onlineInitializedForSessionRef.current !== sessionKey;
+    if (isInitialConnect) {
+      onlineInitializedForSessionRef.current = sessionKey;
+    }
+
+    const sendHeartbeat = (allowInitialOnlineFlip: boolean) => {
+      const latestMember = currentUserRef.current;
+      if (!auth.currentUser || !latestMember || !navigator.onLine) return;
+
+      const isManualOffline = !allowInitialOnlineFlip && latestMember.liveStatus === 'offline';
+      if (isManualOffline) return;
+
+      const nextStatus: MemberLiveStatus =
+        latestMember.liveStatus === 'offline' ? 'online_ready' : latestMember.liveStatus;
+      const nowIso = new Date().toISOString();
+      setPresenceClockMs(Date.now());
+
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === latestMember.id
+            ? { ...m, liveStatus: nextStatus, updatedAt: nowIso }
+            : m
+        )
+      );
+
+      setDoc(
+        doc(db, `clubs/${latestMember.clubId}/members`, latestMember.id),
+        {
+          liveStatus: nextStatus,
+          updatedAt: nowIso,
+        },
+        { merge: true }
+      ).catch(() => {});
+    };
+
+    sendHeartbeat(isInitialConnect);
+
+    const heartbeatTimer = window.setInterval(() => {
+      sendHeartbeat(false);
+    }, 60_000);
+
+    return () => window.clearInterval(heartbeatTimer);
+  }, [firebaseUser?.uid, currentUserRaw?.id, isNetworkOnline]);
 
   // Resolve active member profile cleanly whenever Firebase Auth user or members list updates
   useEffect(() => {
@@ -718,12 +846,15 @@ export default function App() {
         } else {
           const ownerDoc = members.find((m) => m.id === 'enp-owner');
           if (ownerDoc && ownerDoc.authUid !== cred.user.uid) {
-            const updatedOwner = { ...ownerDoc, authUid: cred.user.uid };
+            const nowIso = new Date().toISOString();
+            const updatedOwner = {
+              ...ownerDoc,
+              authUid: cred.user.uid,
+              liveStatus: 'online_ready' as MemberLiveStatus,
+              updatedAt: nowIso,
+            };
             setMembers((prev) => prev.map((m) => (m.id === 'enp-owner' ? updatedOwner : m)));
-            await syncDocToFirestore(`clubs/${clubConfig.clubId}/members`, 'enp-owner', {
-              ...updatedOwner,
-              updatedAt: new Date().toISOString(),
-            });
+            await syncDocToFirestore(`clubs/${clubConfig.clubId}/members`, 'enp-owner', updatedOwner);
           }
         }
       } else {
@@ -734,6 +865,7 @@ export default function App() {
           setCurrentUserId(matched.id);
         } else {
           const newId = cred.user.uid;
+          const nowIso = new Date().toISOString();
           const base = clubConfig.startingRating || 1200;
           const baseHandle =
             (cred.user.displayName || 'member')
@@ -754,6 +886,7 @@ export default function App() {
             yearLevel: 'Ingénieur',
             titleBadge: 'Verified Member',
             liveStatus: 'online_ready',
+            updatedAt: nowIso,
             bio: 'Signed in via verified Google Account.',
             avatarUrl: cred.user.photoURL || undefined,
             avatarInitials: (cred.user.displayName || 'CM').slice(0, 2).toUpperCase(),
@@ -790,10 +923,7 @@ export default function App() {
           setCurrentUserId(newId);
           const clubSnap = await getDoc(doc(db, 'clubs', clubConfig.clubId));
           if (clubSnap.exists()) {
-            await syncDocToFirestore(`clubs/${clubConfig.clubId}/members`, newId, {
-              ...newMember,
-              updatedAt: new Date().toISOString(),
-            });
+            await syncDocToFirestore(`clubs/${clubConfig.clubId}/members`, newId, newMember as unknown as Record<string, unknown>);
           }
         }
       }
@@ -804,6 +934,35 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    const signingOutMember = currentUserRef.current;
+    const nowIso = new Date().toISOString();
+    onlineInitializedForSessionRef.current = null;
+
+    if (signingOutMember) {
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === signingOutMember.id
+            ? { ...m, liveStatus: 'offline', gpsLocation: undefined, updatedAt: nowIso }
+            : m
+        )
+      );
+      if (auth.currentUser) {
+        try {
+          await setDoc(
+            doc(db, `clubs/${signingOutMember.clubId}/members`, signingOutMember.id),
+            {
+              liveStatus: 'offline',
+              gpsLocation: deleteField(),
+              updatedAt: nowIso,
+            },
+            { merge: true }
+          );
+        } catch {
+          // ignore offline write failure during sign-out
+        }
+      }
+    }
+
     try {
       await fbSignOut(auth);
     } catch {
@@ -1765,12 +1924,25 @@ export default function App() {
     if (!isAdminOrOwner && currentUser.id !== id) return;
     const target = members.find((m) => m.id === id);
     if (!target) return;
-    const updated: ClubMember = { ...target, liveStatus: status };
+    const nowIso = new Date().toISOString();
+    setPresenceClockMs(Date.now());
+    const updated: ClubMember = {
+      ...target,
+      liveStatus: status,
+      gpsLocation: status === 'offline' ? undefined : target.gpsLocation,
+      updatedAt: nowIso,
+    };
     setMembers((prev) => prev.map((m) => (m.id === id ? updated : m)));
-    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
-      ...updated,
-      updatedAt: new Date().toISOString(),
-    });
+    if (!auth.currentUser) return;
+    const cleanData = stripUndefined({ ...updated }) as Record<string, unknown>;
+    if (status === 'offline') {
+      cleanData.gpsLocation = deleteField();
+    }
+    setDoc(doc(db, `clubs/${updated.clubId}/members`, updated.id), cleanData, {
+      merge: true,
+    }).catch((error) =>
+      handleFirestoreError(error, OperationType.WRITE, `clubs/${updated.clubId}/members/${updated.id}`)
+    );
   };
 
   const handleUpdateMemberAvatar = (id: string, avatarUrl: string) => {
@@ -1886,11 +2058,31 @@ export default function App() {
     if (!isAdminOrOwner && currentUser.id !== memberId) return;
     const target = members.find((m) => m.id === memberId);
     if (!target) return;
-    const updated: ClubMember = { ...target, campusMeetupZoneId: zoneId };
+    const nowIso = new Date().toISOString();
+    const nextZone = ENP_CAMPUS_MEETUP_ZONES.find((z) => z.id === zoneId);
+    const updatedGps =
+      nextZone && target.gpsLocation?.label?.startsWith('Campus Spot')
+        ? {
+            ...target.gpsLocation,
+            lat: nextZone.lat,
+            lng: nextZone.lng,
+            label: `Campus Spot (${nextZone.shortTag})`,
+            updatedAt: new Date().toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+          }
+        : target.gpsLocation;
+    const updated: ClubMember = {
+      ...target,
+      campusMeetupZoneId: zoneId,
+      gpsLocation: updatedGps,
+      updatedAt: nowIso,
+    };
     setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
     syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
       ...updated,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     });
   };
 
@@ -1905,17 +2097,20 @@ export default function App() {
     if (!isAdminOrOwner && currentUser.id !== memberId) return;
     const target = members.find((m) => m.id === memberId);
     if (!target) return;
+    const nowIso = new Date().toISOString();
+    setPresenceClockMs(Date.now());
     const updated: ClubMember = {
       ...target,
       liveStatus: gps ? 'campus_otb' : target.liveStatus,
       gpsLocation: gps || undefined,
+      updatedAt: nowIso,
     };
     setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
     if (!auth.currentUser) return;
     try {
       const cleanData = stripUndefined({
         ...updated,
-        updatedAt: new Date().toISOString(),
+        updatedAt: nowIso,
       }) as Record<string, unknown>;
       if (!gps) {
         cleanData.gpsLocation = deleteField();
@@ -2009,7 +2204,7 @@ export default function App() {
       department: 'Engineering & Sciences',
       yearLevel: 'Club Captain',
       titleBadge: 'Founding Club Admin',
-      liveStatus: 'campus_otb',
+      liveStatus: 'offline',
       bio: `Founding captain of ${newClub.clubName} (${newClub.universityName}).`,
       avatarInitials: newClub.clubName.slice(0, 2).toUpperCase(),
       avatarColor: newClub.accentColor,
@@ -2935,58 +3130,69 @@ export default function App() {
                       </div>
 
                       <div className="space-y-2 max-w-full min-w-0">
-                        {freeNowPlayers.slice(0, 4).map((p) => (
-                          <div
-                            key={p.id}
-                            className="p-2.5 sm:p-3 rounded-xl bg-[#061020]/70 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 max-w-full min-w-0 overflow-hidden"
-                          >
-                            <div className="min-w-0 max-w-full">
-                              <div className="font-bold text-xs sm:text-sm text-white truncate">
-                                {p.name} ·{' '}
-                                <span className="font-mono-tabular text-[#FF6B00]">
-                                  R {p.fide.rapid}
-                                </span>{' '}
-                                ·{' '}
-                                <span className="font-mono-tabular text-[#26E6DE]">
-                                  B {p.fide.blitz}
-                                </span>
-                              </div>
-                              <div className="text-[10px] sm:text-xs text-slate-400 truncate">
-                                {p.department} ·{' '}
-                                {p.liveStatus === 'campus_otb'
-                                  ? 'On Campus OTB'
-                                  : 'Online Ready'}
-                              </div>
+                        {freeNowPlayers.length === 0 ? (
+                          <div className="p-4 sm:p-5 rounded-xl bg-[#061020]/70 border border-white/10 text-center space-y-1.5">
+                            <div className="text-xs sm:text-sm font-bold text-slate-200">
+                              0 members currently online
                             </div>
-
-                            <div className="flex items-center gap-1.5 max-w-full shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedMemberId(p.id);
-                                  setActiveModule('members');
-                                }}
-                                className="min-h-[28px] sm:min-h-[38px] flex-1 sm:flex-initial px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-white/8 border border-white/15 text-slate-200 hover:bg-white/15 cursor-pointer"
-                              >
-                                Profile
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenPrivateChatWithMember(p.id)}
-                                className="min-h-[28px] sm:min-h-[38px] flex-1 sm:flex-initial px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-bold bg-[#1E56A0] hover:bg-[#2563EB] text-white cursor-pointer"
-                              >
-                                DM
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setActiveModule('studio')}
-                                className="min-h-[28px] sm:min-h-[38px] flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-1 rounded-lg text-[10px] sm:text-xs font-bold bg-[#FF6B00] hover:bg-[#FF8533] text-white cursor-pointer"
-                              >
-                                Studio
-                              </button>
-                            </div>
+                            <p className="text-[10px] sm:text-xs text-slate-400">
+                              Members automatically appear online while signed in and connected, and switch offline automatically when disconnected or signed out.
+                            </p>
                           </div>
-                        ))}
+                        ) : (
+                          freeNowPlayers.slice(0, 4).map((p) => (
+                            <div
+                              key={p.id}
+                              className="p-2.5 sm:p-3 rounded-xl bg-[#061020]/70 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 max-w-full min-w-0 overflow-hidden"
+                            >
+                              <div className="min-w-0 max-w-full">
+                                <div className="font-bold text-xs sm:text-sm text-white truncate">
+                                  {p.name} ·{' '}
+                                  <span className="font-mono-tabular text-[#FF6B00]">
+                                    R {p.fide.rapid}
+                                  </span>{' '}
+                                  ·{' '}
+                                  <span className="font-mono-tabular text-[#26E6DE]">
+                                    B {p.fide.blitz}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] sm:text-xs text-slate-400 truncate">
+                                  {p.department} ·{' '}
+                                  {p.liveStatus === 'campus_otb'
+                                    ? 'On Campus OTB'
+                                    : 'Online Ready'}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 max-w-full shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedMemberId(p.id);
+                                    setActiveModule('members');
+                                  }}
+                                  className="min-h-[28px] sm:min-h-[38px] flex-1 sm:flex-initial px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-white/8 border border-white/15 text-slate-200 hover:bg-white/15 cursor-pointer"
+                                >
+                                  Profile
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenPrivateChatWithMember(p.id)}
+                                  className="min-h-[28px] sm:min-h-[38px] flex-1 sm:flex-initial px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-bold bg-[#1E56A0] hover:bg-[#2563EB] text-white cursor-pointer"
+                                >
+                                  DM
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveModule('studio')}
+                                  className="min-h-[28px] sm:min-h-[38px] flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-1 rounded-lg text-[10px] sm:text-xs font-bold bg-[#FF6B00] hover:bg-[#FF8533] text-white cursor-pointer"
+                                >
+                                  Studio
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </div>
                     </div>
                   </div>
@@ -3072,7 +3278,7 @@ export default function App() {
                   clubName={clubConfig.clubName}
                   clubs={clubs}
                   members={clubMembers}
-                  allMembers={members}
+                  allMembers={members.map(withResolvedPresence)}
                   currentUser={currentUser}
                   messages={chatMessages}
                   initialDmRecipientId={initialDmTargetId}

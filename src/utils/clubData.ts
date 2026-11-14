@@ -249,6 +249,36 @@ export interface ClubMember {
     isLiveBrowserGps?: boolean;
     updatedAt: string;
   };
+  updatedAt?: string;
+}
+
+export const PRESENCE_STALE_MS = 3 * 60 * 1000;
+
+export function resolveLivePresenceStatus(
+  member: ClubMember,
+  nowMs: number = Date.now()
+): MemberLiveStatus {
+  if (member.liveStatus === 'offline') return 'offline';
+  if (!member.updatedAt) return 'offline';
+  const lastSeenMs = Date.parse(member.updatedAt);
+  if (Number.isNaN(lastSeenMs) || nowMs - lastSeenMs > PRESENCE_STALE_MS) {
+    return 'offline';
+  }
+  return member.liveStatus;
+}
+
+export function isLiveGpsFresh(
+  member: ClubMember,
+  nowMs: number = Date.now()
+): boolean {
+  if (!member.gpsLocation?.isLiveBrowserGps) return false;
+  if (
+    typeof member.gpsLocation.lat !== 'number' ||
+    typeof member.gpsLocation.lng !== 'number'
+  ) {
+    return false;
+  }
+  return resolveLivePresenceStatus(member, nowMs) !== 'offline';
 }
 
 export interface EnpCampusMeetupZone {

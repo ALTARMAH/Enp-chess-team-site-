@@ -7,6 +7,11 @@ import {
 } from '../utils/clubData';
 import { resolveAssetUrl } from '../utils/assetUrls';
 import {
+  CampusLeafletMap,
+  CampusMapLayerMode,
+  CampusPinData,
+} from './CampusLeafletMap';
+import {
   APIProvider,
   Map as GoogleMap,
   AdvancedMarker,
@@ -21,6 +26,7 @@ import {
   Navigation,
   Compass,
   Radio,
+  Layers,
 } from 'lucide-react';
 
 interface FreeHourRadarProps {
@@ -79,9 +85,12 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
   >('idle');
   const [gpsStatusMessage, setGpsStatusMessage] = useState<string>('');
   const [activeInfoMarkerId, setActiveInfoMarkerId] = useState<string | null>(null);
+  const [mapLayerMode, setMapLayerMode] = useState<CampusMapLayerMode>('satellite');
   const watchIdRef = useRef<number | null>(null);
 
   const isAdminOrOwner = currentUser?.role === 'owner' || currentUser?.role === 'admin';
+  const hasActivePin =
+    gpsWatchStatus === 'tracking' || Boolean(currentUser?.gpsLocation?.isLiveBrowserGps);
 
   useEffect(() => {
     if (!currentUser) {
@@ -153,20 +162,23 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
       onOpenAuthModal();
       return;
     }
-    if (!('geolocation' in navigator)) {
-      setGpsWatchStatus('denied');
-      setGpsStatusMessage('Browser Geolocation API is not supported on this device.');
-      return;
-    }
 
-    if (gpsWatchStatus === 'tracking') {
-      if (watchIdRef.current !== null) {
+    if (hasActivePin) {
+      if (watchIdRef.current !== null && 'geolocation' in navigator) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
       setGpsWatchStatus('idle');
-      setGpsStatusMessage('Stopped live GPS broadcasting.');
+      setGpsStatusMessage('Stopped live GPS / campus spot sharing.');
       onUpdateMemberGps?.(currentUser.id, null);
+      return;
+    }
+
+    if (!('geolocation' in navigator)) {
+      setGpsWatchStatus('denied');
+      setGpsStatusMessage(
+        'Browser Geolocation API is not supported on this device. You can explicitly check in at your selected ENP campus spot instead.'
+      );
       return;
     }
 
@@ -200,11 +212,15 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
     };
 
     const onError = (err: GeolocationPositionError) => {
+      if (watchIdRef.current !== null && 'geolocation' in navigator) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
       setGpsWatchStatus('denied');
       setGpsStatusMessage(
         err.code === 1
-          ? 'GPS permission was denied in the browser. Allow location access or select your ENP campus meetup zone below.'
-          : 'Could not lock GPS signal right now. You can select your exact ENP campus building pin below.'
+          ? 'Browser blocked location access: click the Lock / Site Settings icon in your address bar, allow Location, then click Retry GPS — or pin your chosen ENP campus spot manually.'
+          : 'GPS signal timed out or unavailable on this device. Click Retry GPS or pin your chosen ENP campus spot manually.'
       );
     };
 
@@ -221,7 +237,33 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
     watchIdRef.current = id;
   };
 
-  // Strictly show ONLY members who actually granted browser GPS permission (zero fabricated pins)
+  // Explicit manual spot opt-in when user cannot/chooses not to use hardware GPS
+  const handlePinSelectedCampusSpot = () => {
+    if (!currentUser) {
+      onOpenAuthModal();
+      return;
+    }
+    const zone = getZoneById(currentUser.campusMeetupZoneId);
+    const timeStr = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    setGpsWatchStatus('tracking');
+    setGpsStatusMessage(
+      `Manual Campus Check-In active at ${zone.shortTag} (${zone.lat.toFixed(5)}, ${zone.lng.toFixed(5)} · Updated ${timeStr})`
+    );
+    setActiveInfoMarkerId(`member-${currentUser.id}`);
+    onUpdateMemberGps?.(currentUser.id, {
+      lat: zone.lat,
+      lng: zone.lng,
+      accuracyMeters: 25,
+      label: `Campus Spot (${zone.shortTag})`,
+      isLiveBrowserGps: true,
+      updatedAt: timeStr,
+    });
+  };
+
+  // Strictly show ONLY members who actually granted browser GPS permission or explicitly checked in
   const onlineMembersOnMap = members.filter(
     (m) =>
       Boolean(m.gpsLocation?.isLiveBrowserGps) &&
@@ -229,7 +271,7 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
       typeof m.gpsLocation?.lng === 'number'
   );
 
-  const memberMapPins = onlineMembersOnMap.map((m) => {
+  const memberMapPins: CampusPinData[] = onlineMembersOnMap.map((m) => {
     const zone = getZoneById(m.campusMeetupZoneId);
     return {
       member: m,
@@ -241,18 +283,6 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
       updatedAt: m.gpsLocation!.updatedAt,
     };
   });
-
-  // Relative equirectangular projection for Zero-Key Campus GPS Radar centered on ENP El Harrach
-  const projectToRadarPercent = (lat: number, lng: number) => {
-    const latSpan = 0.0032; // ~350m vertical span across ENP campus
-    const lngSpan = 0.0042; // ~380m horizontal span across ENP campus
-    const rawX = 50 + ((lng - ENP_CAMPUS_CENTER.lng) / lngSpan) * 80;
-    const rawY = 50 - ((lat - ENP_CAMPUS_CENTER.lat) / latSpan) * 80;
-    return {
-      xPct: Math.max(8, Math.min(92, rawX)),
-      yPct: Math.max(12, Math.min(88, rawY)),
-    };
-  };
 
   const selectedRadarPin =
     memberMapPins.find((p) => `member-${p.member.id}` === activeInfoMarkerId) || null;
@@ -275,15 +305,15 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
             type="button"
             onClick={handleShareLiveGps}
             className={`min-h-[32px] sm:min-h-[42px] px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-lg ${
-              gpsWatchStatus === 'tracking'
+              hasActivePin
                 ? 'bg-emerald-500 text-[#040B16] shadow-emerald-500/25'
                 : 'bg-[#FF6B00] hover:bg-[#FF8533] text-white shadow-[#FF6B00]/25'
             }`}
           >
             <Navigation className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span>
-              {gpsWatchStatus === 'tracking'
-                ? 'GPS Active (Stop)'
+              {hasActivePin
+                ? 'Live Pin Active (Stop)'
                 : gpsWatchStatus === 'requesting'
                 ? 'Locating...'
                 : 'Share Live GPS'}
@@ -313,35 +343,34 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
 
       {gpsStatusMessage && (
         <div
-          className={`p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl border text-[11px] sm:text-xs font-mono-tabular flex flex-wrap items-center justify-between gap-2 ${
-            gpsWatchStatus === 'tracking'
+          className={`p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl border text-[11px] sm:text-xs flex flex-wrap items-center justify-between gap-2 ${
+            hasActivePin
               ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200'
               : gpsWatchStatus === 'denied'
               ? 'bg-amber-500/15 border-amber-400/40 text-amber-200'
               : 'bg-[#1E56A0]/25 border-[#26E6DE]/40 text-[#26E6DE]'
           }`}
         >
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <Radio className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 text-[#FF6B00]" />
-            <span>{gpsStatusMessage}</span>
+          <div className="flex items-start sm:items-center gap-2 min-w-0 flex-1">
+            <Radio className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 text-[#FF6B00] mt-0.5 sm:mt-0" />
+            <span className="leading-snug">{gpsStatusMessage}</span>
           </div>
-          {currentUser && (
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <span className="text-slate-300 font-sans">Spot:</span>
-              <select
-                aria-label="Select my ENP campus meetup zone"
-                value={currentUser.campusMeetupZoneId || 'zone-jardins-library'}
-                onChange={(e) =>
-                  onUpdateMemberMeetupZone?.(currentUser.id, e.target.value)
-                }
-                className="px-2 py-1 rounded-lg bg-[#061020] border border-white/20 text-white font-sans font-bold text-[11px] sm:text-xs"
+          {gpsWatchStatus === 'denied' && currentUser && (
+            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleShareLiveGps}
+                className="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[11px] font-bold cursor-pointer"
               >
-                {ENP_CAMPUS_MEETUP_ZONES.map((z) => (
-                  <option key={z.id} value={z.id}>
-                    {z.shortTag}
-                  </option>
-                ))}
-              </select>
+                Retry Live GPS
+              </button>
+              <button
+                type="button"
+                onClick={handlePinSelectedCampusSpot}
+                className="px-2.5 py-1 rounded-lg bg-[#FF6B00] hover:bg-[#FF8533] text-white text-[11px] font-bold cursor-pointer"
+              >
+                Pin {getZoneById(currentUser.campusMeetupZoneId).shortTag}
+              </button>
             </div>
           )}
         </div>
@@ -363,7 +392,7 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
         </div>
       )}
 
-      {/* LIVE CAMPUS GPS RADAR (Google Maps when VITE_GOOGLE_MAPS_API_KEY is set, Zero-Key Interactive Campus Radar otherwise) */}
+      {/* LIVE CAMPUS GPS MAP (Google Maps when VITE_GOOGLE_MAPS_API_KEY is set, Real Terrain/Satellite/Streets Leaflet Map otherwise) */}
       <div className="w-full">
         <div className="w-full broadcast-panel rounded-2xl overflow-hidden flex flex-col border border-[#26E6DE]/30">
           <div className="p-2.5 sm:p-4 border-b border-white/10 bg-[#061020]/90 flex flex-wrap items-center justify-between gap-2">
@@ -374,45 +403,89 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
               </span>
               <h3 className="text-xs sm:text-base font-bold text-white">
                 {memberMapPins.length > 0
-                  ? 'Live GPS Shared Positions (Tap Avatar to Challenge)'
-                  : 'Campus GPS Map (Waiting for Live GPS Opt-In)'}
+                  ? 'Live Shared Positions (Tap Avatar to Challenge)'
+                  : 'ENP El Harrach Campus Terrain & Live GPS Map'}
               </h3>
             </div>
 
-            {currentUser && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] sm:text-[11px] text-slate-400">My Spot:</span>
-                <select
-                  aria-label="Quick switch my campus meetup zone"
-                  value={currentUser.campusMeetupZoneId || 'zone-jardins-library'}
-                  onChange={(e) => {
-                    onUpdateMemberMeetupZone?.(currentUser.id, e.target.value);
-                  }}
-                  className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg sm:rounded-xl bg-[#040B16] border border-[#26E6DE]/40 text-[11px] sm:text-xs font-bold text-[#26E6DE]"
-                >
-                  {ENP_CAMPUS_MEETUP_ZONES.map((z) => (
-                    <option key={z.id} value={z.id}>
-                      {z.shortTag}
-                    </option>
-                  ))}
-                </select>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Terrain / Satellite / Streets Switcher */}
+              <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-[#040B16] border border-white/15">
+                <Layers className="w-3 h-3 text-[#26E6DE] mx-1.5 hidden sm:block" />
+                {(['terrain', 'satellite', 'streets'] as CampusMapLayerMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setMapLayerMode(mode)}
+                    className={`px-2 py-1 rounded-md text-[10px] sm:text-[11px] font-bold capitalize transition-colors cursor-pointer ${
+                      mapLayerMode === mode
+                        ? 'bg-[#FF6B00] text-white'
+                        : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
               </div>
-            )}
+
+              {currentUser && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] sm:text-[11px] text-slate-400">My Spot:</span>
+                  <select
+                    aria-label="Quick switch my campus meetup zone"
+                    value={currentUser.campusMeetupZoneId || 'zone-jardins-library'}
+                    onChange={(e) => {
+                      onUpdateMemberMeetupZone?.(currentUser.id, e.target.value);
+                    }}
+                    className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg sm:rounded-xl bg-[#040B16] border border-[#26E6DE]/40 text-[11px] sm:text-xs font-bold text-[#26E6DE]"
+                  >
+                    {ENP_CAMPUS_MEETUP_ZONES.map((z) => (
+                      <option key={z.id} value={z.id}>
+                        {z.shortTag}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="relative w-full h-[270px] sm:h-[440px] bg-[#040B16] overflow-hidden">
+          <div className="relative w-full h-[300px] sm:h-[460px] bg-[#040B16] overflow-hidden">
             {MAPS_API_KEY ? (
-              <APIProvider apiKey={MAPS_API_KEY}>
-                <GoogleMap
-                  defaultCenter={ENP_CAMPUS_CENTER}
-                  defaultZoom={17}
-                  mapId="DEMO_MAP_ID"
-                  internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-                  gestureHandling="greedy"
-                  disableDefaultUI={true}
-                  zoomControl={true}
-                  className="w-full h-full"
-                >
+              <div className="relative w-full h-full">
+                <APIProvider apiKey={MAPS_API_KEY} region="DZ" language="en">
+                  <GoogleMap
+                    defaultCenter={ENP_CAMPUS_CENTER}
+                    defaultZoom={17}
+                    mapTypeId={
+                      mapLayerMode === 'satellite'
+                        ? 'hybrid'
+                        : mapLayerMode === 'terrain'
+                        ? 'terrain'
+                        : 'roadmap'
+                    }
+                    mapId="DEMO_MAP_ID"
+                    internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+                    gestureHandling="greedy"
+                    disableDefaultUI={true}
+                    zoomControl={true}
+                    className="w-full h-full"
+                  >
+                    {/* Fixed ENP Campus Meetup Zone Landmarks */}
+                    {ENP_CAMPUS_MEETUP_ZONES.map((zone) => (
+                      <AdvancedMarker
+                        key={zone.id}
+                        position={{ lat: zone.lat, lng: zone.lng }}
+                        title={zone.name}
+                      >
+                        <div className="flex flex-col items-center pointer-events-none">
+                          <span className="w-2.5 h-2.5 rounded-full bg-[#26E6DE] border-2 border-[#061020] shadow" />
+                          <span className="mt-0.5 px-1.5 py-0.5 rounded bg-[#061020]/90 border border-[#26E6DE]/40 text-[9px] font-bold text-slate-100 whitespace-nowrap shadow">
+                            {zone.shortTag}
+                          </span>
+                        </div>
+                      </AdvancedMarker>
+                    ))}
                   {memberMapPins.map((pin) => {
                     const markerKey = `member-${pin.member.id}`;
                     const isMe = currentUser?.id === pin.member.id;
@@ -510,105 +583,66 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
                   })}
                 </GoogleMap>
               </APIProvider>
+
+                {memberMapPins.length === 0 && (
+                  <div className="absolute inset-x-3 bottom-3 sm:inset-x-auto sm:left-4 sm:bottom-4 z-20 px-3 py-2 rounded-xl bg-[#061020]/90 border border-white/15 backdrop-blur-md text-[10px] sm:text-xs text-slate-200 max-w-md shadow-xl flex flex-wrap items-center gap-2">
+                    <span>
+                      0 live GPS pins right now. Sign in and tap{' '}
+                      <span className="text-[#FF6B00] font-bold">Share Live GPS</span> to appear on the map
+                      {currentUser ? ' or pin your selected campus spot:' : '.'}
+                    </span>
+                    {currentUser && (
+                      <button
+                        type="button"
+                        onClick={handlePinSelectedCampusSpot}
+                        className="px-2 py-1 rounded-lg bg-[#1E56A0] hover:bg-[#2563EB] text-white text-[10px] font-bold cursor-pointer shrink-0"
+                      >
+                        Pin {getZoneById(currentUser.campusMeetupZoneId).shortTag}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             ) : (
-              /* ZERO-KEY INTERACTIVE ENP CAMPUS GPS RADAR (Works immediately on Vercel & Firebase without Maps Billing) */
-              <div
-                className="relative w-full h-full select-none"
-                style={{
-                  backgroundImage:
-                    'radial-gradient(circle at 50% 50%, rgba(38,230,222,0.12) 0%, rgba(6,16,32,0.92) 72%), linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px)',
-                  backgroundSize: '100% 100%, 36px 36px, 36px 36px',
-                }}
-              >
-                {/* Concentric Radar Rings */}
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="w-[160px] h-[160px] sm:w-[230px] sm:h-[230px] rounded-full border border-[#26E6DE]/15" />
-                  <div className="absolute w-[250px] h-[250px] sm:w-[370px] sm:h-[370px] rounded-full border border-[#26E6DE]/10" />
-                </div>
+              /* REAL TERRAIN / SATELLITE / STREETS LEAFLET MAP (Zero API Key Required on Vercel & Mobile) */
+              <div className="relative w-full h-full select-none">
+                <CampusLeafletMap
+                  center={ENP_CAMPUS_CENTER}
+                  layerMode={mapLayerMode}
+                  memberPins={memberMapPins}
+                  currentUserId={currentUser?.id}
+                  activeMarkerId={activeInfoMarkerId}
+                  onSelectMarker={setActiveInfoMarkerId}
+                />
 
                 {/* Top Radar Coordinate Tag */}
-                <div className="absolute top-2.5 left-2.5 sm:top-3.5 sm:left-4 z-10 px-2 py-1 rounded-lg bg-[#061020]/90 border border-white/15 text-[9px] sm:text-[10px] font-mono-tabular text-slate-300 flex items-center gap-1.5">
+                <div className="pointer-events-none absolute top-2.5 right-2.5 z-[400] px-2 py-1 rounded-lg bg-[#061020]/90 border border-white/15 text-[9px] sm:text-[10px] font-mono-tabular text-slate-200 flex items-center gap-1.5 shadow">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   <span>ENP El Harrach · 36.723°N, 3.150°E</span>
                 </div>
 
-                {/* Campus Meetup Zone Landmarks */}
-                {ENP_CAMPUS_MEETUP_ZONES.map((zone) => {
-                  const { xPct, yPct } = projectToRadarPercent(zone.lat, zone.lng);
-                  return (
-                    <div
-                      key={zone.id}
-                      style={{ left: `${xPct}%`, top: `${yPct}%` }}
-                      className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center opacity-70"
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#26E6DE]/70" />
-                      <span className="mt-0.5 px-1.5 py-0.5 rounded bg-[#061020]/80 border border-white/10 text-[8px] sm:text-[9px] font-mono-tabular text-slate-300 whitespace-nowrap">
-                        {zone.shortTag}
-                      </span>
-                    </div>
-                  );
-                })}
-
-                {/* Live Online & Exact GPS Member Avatars */}
-                {memberMapPins.map((pin) => {
-                  const markerKey = `member-${pin.member.id}`;
-                  const isMe = currentUser?.id === pin.member.id;
-                  const isSelected = activeInfoMarkerId === markerKey;
-                  const { xPct, yPct } = projectToRadarPercent(pin.lat, pin.lng);
-
-                  return (
-                    <button
-                      key={markerKey}
-                      type="button"
-                      onClick={() =>
-                        setActiveInfoMarkerId(isSelected ? null : markerKey)
-                      }
-                      style={{ left: `${xPct}%`, top: `${yPct}%` }}
-                      aria-label={`Locate ${pin.member.name} on ENP Campus GPS Radar`}
-                      className={`absolute -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center cursor-pointer transition-transform ${
-                        isSelected ? 'scale-115 z-30' : 'hover:scale-110'
-                      }`}
-                    >
-                      <span
-                        className={`w-9 h-9 sm:w-11 sm:h-11 rounded-full overflow-hidden border-2 sm:border-[3px] shadow-xl flex items-center justify-center bg-[#061020] ${
-                          pin.isExactGps
-                            ? 'border-emerald-400 ring-2 ring-emerald-400/40'
-                            : isMe
-                            ? 'border-[#26E6DE] ring-2 ring-[#26E6DE]/40'
-                            : 'border-[#FF6B00]'
-                        }`}
-                        style={{ backgroundColor: pin.member.avatarColor }}
-                      >
-                        {pin.member.avatarUrl ? (
-                          <img
-                            src={resolveAssetUrl(pin.member.avatarUrl)}
-                            alt={pin.member.name}
-                            referrerPolicy="no-referrer"
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <span className="text-[10px] sm:text-xs font-extrabold text-white">
-                            {pin.member.avatarInitials}
-                          </span>
-                        )}
-                      </span>
-                      <span className="mt-0.5 px-1.5 py-0.5 rounded bg-[#061020]/95 border border-white/15 text-[9px] font-bold text-white whitespace-nowrap shadow">
-                        {pin.member.name.split(' ')[0]} · {pin.member.fide.rapid}
-                      </span>
-                    </button>
-                  );
-                })}
-
                 {memberMapPins.length === 0 && (
-                  <div className="pointer-events-none absolute inset-x-3 bottom-3 sm:inset-x-auto sm:left-4 sm:bottom-4 z-20 px-3 py-2 rounded-xl bg-[#061020]/90 border border-white/15 backdrop-blur-md text-[10px] sm:text-xs text-slate-300 max-w-sm">
-                    No members are sharing live GPS right now. Sign in and tap{' '}
-                    <span className="text-[#FF6B00] font-bold">Share Live GPS</span> to grant browser location permission and appear on the map.
+                  <div className="absolute inset-x-3 bottom-3 sm:inset-x-auto sm:left-4 sm:bottom-4 z-[400] px-3 py-2 rounded-xl bg-[#061020]/90 border border-white/15 backdrop-blur-md text-[10px] sm:text-xs text-slate-200 max-w-md shadow-xl flex flex-wrap items-center gap-2">
+                    <span>
+                      0 live GPS pins right now. Sign in and tap{' '}
+                      <span className="text-[#FF6B00] font-bold">Share Live GPS</span> to appear on the map
+                      {currentUser ? ' or pin your selected campus spot:' : '.'}
+                    </span>
+                    {currentUser && (
+                      <button
+                        type="button"
+                        onClick={handlePinSelectedCampusSpot}
+                        className="px-2 py-1 rounded-lg bg-[#1E56A0] hover:bg-[#2563EB] text-white text-[10px] font-bold cursor-pointer shrink-0"
+                      >
+                        Pin {getZoneById(currentUser.campusMeetupZoneId).shortTag}
+                      </button>
+                    )}
                   </div>
                 )}
 
                 {/* Tapped Member Details & Challenge Card */}
                 {selectedRadarPin && (
-                  <div className="absolute bottom-2.5 right-2.5 left-2.5 sm:left-auto sm:w-72 z-40 p-2.5 sm:p-3 rounded-xl bg-[#061020]/95 backdrop-blur-md border border-[#26E6DE]/45 shadow-2xl space-y-2">
+                  <div className="absolute bottom-2.5 right-2.5 left-2.5 sm:left-auto sm:w-72 z-[450] p-2.5 sm:p-3 rounded-xl bg-[#061020]/95 backdrop-blur-md border border-[#26E6DE]/45 shadow-2xl space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <div className="text-xs font-extrabold text-white truncate">
@@ -616,9 +650,7 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
                         </div>
                         <div className="text-[10px] font-mono-tabular text-[#26E6DE]">
                           {selectedRadarPin.member.fide.rapid} Rapid ·{' '}
-                          {selectedRadarPin.isExactGps
-                            ? `Live GPS (±${selectedRadarPin.accuracy || 10}m)`
-                            : selectedRadarPin.zone.shortTag}
+                          {selectedRadarPin.member.gpsLocation?.label || selectedRadarPin.zone.shortTag}
                         </div>
                       </div>
                       <button

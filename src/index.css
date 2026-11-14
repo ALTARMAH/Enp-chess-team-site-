@@ -303,3 +303,26 @@ html[data-theme="light"] .broadcast-panel .bg-\[\#040B16\]\/60 {
     linear-gradient(90deg, rgba(6, 16, 32, 0.95) 0%, rgba(6, 16, 32, 0.68) 48%, rgba(6, 16, 32, 0.35) 100%),
     linear-gradient(180deg, rgba(6, 16, 32, 0.25) 0%, rgba(6, 16, 32, 0.6) 68%, #061020 100%);
 }
+
+/* Campus Leaflet Radar Map Tooltips & Pins */
+.enp-zone-tooltip {
+  background: rgba(6, 16, 32, 0.88) !important;
+  border: 1px solid rgba(38, 230, 222, 0.35) !important;
+  color: #e2e8f0 !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  padding: 1px 5px !important;
+  border-radius: 5px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45) !important;
+  white-space: nowrap !important;
+}
+
+.enp-zone-tooltip::before {
+  display: none !important;
+}
+
+.enp-custom-member-pin {
+  background: transparent !important;
+  border: none !important;
+}
+

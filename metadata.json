@@ -1,6 +1,6 @@
 {
   "name": "ENP Chess Hub — Multi-Club University Chess Platform",
   "description": "Flagship collegiate chess platform for École Nationale Polytechnique (ENP Alger — نادي الشطرنج) featuring Mikhail Tal Brilliant broadcast showcase, dual FIDE Elo & Glicko-2 ratings from 1500, Swiss/Knockout/Round-Robin/Arena tournaments, and campus free-hour matchmaking.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
