@@ -469,25 +469,25 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
   );
 
   return (
-    <section className="space-y-8">
+    <section className="space-y-4 sm:space-y-8">
       {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-4">
+      <div className="flex flex-wrap items-end justify-between gap-2.5 sm:gap-4 border-b border-white/10 pb-3 sm:pb-4">
         <div>
-          <span className="text-xs font-mono-tabular text-[#26E6DE] tracking-wider uppercase">
-            REAL-TIME STOCKFISH WEB WORKER (ZERO-CONTEMPT) · QUICK RESULT LOGGER · CLUB PGN ARCHIVE
+          <span className="text-[10px] sm:text-xs font-mono-tabular text-[#26E6DE] tracking-wider uppercase">
+            STOCKFISH ENGINE · RESULT LOGGER · PGN ARCHIVE
           </span>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">
-            Chessboard Analysis Studio & Match Result Logger
+          <h2 className="text-lg sm:text-3xl font-extrabold text-white mt-0.5 sm:mt-1">
+            Chessboard Analysis Studio
           </h2>
         </div>
 
-        <div className="flex items-center gap-1.5 bg-[#08172E] p-1 rounded-xl border border-white/10">
+        <div className="flex items-center gap-1 bg-[#08172E] p-1 rounded-lg sm:rounded-xl border border-white/10 overflow-x-auto max-w-full">
           {(Object.keys(BOARD_THEMES) as (keyof typeof BOARD_THEMES)[]).map((key) => (
             <button
               key={key}
               type="button"
               onClick={() => setBoardThemeKey(key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-md sm:rounded-lg text-[10px] sm:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 boardThemeKey === key
                   ? 'bg-[#FF6B00] text-white shadow'
                   : 'text-slate-300 hover:text-white hover:bg-white/5'
@@ -500,54 +500,53 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
       </div>
 
       {/* Main 2-Column Studio + Game Submission */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8 items-start">
         {/* Left 7 Cols: Legal 8x8 Chessboard + Real-Time Stockfish Evaluation Bar */}
-        <div className="lg:col-span-7 broadcast-panel p-4 sm:p-6 rounded-2xl space-y-5">
+        <div className="lg:col-span-7 broadcast-panel p-3 sm:p-6 rounded-2xl space-y-3 sm:space-y-5">
           {/* Turn Status & Real-Time Stockfish Engine Bar Header */}
-          <div className="flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 border-b border-white/10 pb-3.5">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2.5 sm:pb-3.5">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <span
-                className={`w-3.5 h-3.5 rounded-sm border shrink-0 ${
+                className={`w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-sm border shrink-0 ${
                   turnColor === 'w'
                     ? 'bg-white border-slate-400'
                     : 'bg-slate-900 border-white/40'
                 }`}
               />
-              <span className="text-xs sm:text-sm font-bold text-white">
+              <span className="text-[11px] sm:text-sm font-bold text-white">
                 {isCheckmate
                   ? `Checkmate · ${turnColor === 'w' ? 'Black' : 'White'} Wins`
                   : isDraw
-                  ? 'Draw Position'
+                  ? 'Draw'
                   : `${turnColor === 'w' ? 'White' : 'Black'} to Move${
                       isCheck ? ' (CHECK!)' : ''
                     }`}
               </span>
-              <span className="text-xs font-mono-tabular text-[#26E6DE] bg-[#061020] px-2.5 py-1 rounded-lg border border-white/10 flex items-center gap-1.5">
+              <span className="text-[10px] sm:text-xs font-mono-tabular text-[#26E6DE] bg-[#061020] px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg border border-white/10 flex items-center gap-1">
                 <Cpu
-                  className={`w-3.5 h-3.5 ${
+                  className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${
                     engineEval.isComputing ? 'animate-pulse text-[#FF6B00]' : 'text-[#26E6DE]'
                   }`}
                 />
-                <span>Eval: {formattedScoreText}</span>
-                <span className="text-slate-400">· Best: {engineEval.bestMoveSan}</span>
+                <span>{formattedScoreText}</span>
+                <span className="text-slate-400">· {engineEval.bestMoveSan}</span>
                 <span className="text-[10px] text-slate-500 hidden sm:inline">
                   ({engineEval.engineLabel})
                 </span>
               </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              {/* Low Depth Selector to prevent browser overload */}
+            <div className="flex flex-wrap items-center gap-1 sm:gap-2">
               <div
-                className="flex items-center bg-[#061020] p-0.5 rounded-lg border border-white/10 font-mono-tabular text-[11px]"
-                title="Stockfish Search Depth (kept low for instant browser responsiveness)"
+                className="flex items-center bg-[#061020] p-0.5 rounded-lg border border-white/10 font-mono-tabular text-[10px] sm:text-[11px]"
+                title="Stockfish Search Depth"
               >
                 {([8, 10, 12] as const).map((d) => (
                   <button
                     key={d}
                     type="button"
                     onClick={() => setEngineDepth(d)}
-                    className={`px-2 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                    className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md font-bold transition-colors cursor-pointer ${
                       engineDepth === d
                         ? 'bg-[#1E56A0] text-white'
                         : 'text-slate-400 hover:text-white'
@@ -561,38 +560,38 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
               <button
                 type="button"
                 onClick={() => setVsStockfishBot((v) => !v)}
-                className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                className={`min-h-[28px] sm:min-h-[36px] px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer ${
                   vsStockfishBot
                     ? 'bg-[#26E6DE] text-[#061020] shadow-md'
                     : 'bg-white/8 hover:bg-white/15 text-[#26E6DE] border border-[#26E6DE]/30'
                 }`}
               >
-                <Cpu className="w-3.5 h-3.5" />
-                <span>{vsStockfishBot ? 'Bot Reply: ON' : 'Vs. Stockfish Bot'}</span>
+                <Cpu className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                <span>{vsStockfishBot ? 'Bot: ON' : 'Vs Bot'}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setFlipped((f) => !f)}
-                className="min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/8 hover:bg-white/15 text-slate-200 cursor-pointer"
+                className="min-h-[28px] sm:min-h-[36px] px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-white/8 hover:bg-white/15 text-slate-200 cursor-pointer"
               >
-                Flip Board
+                Flip
               </button>
               <button
                 type="button"
                 onClick={handleResetBoard}
-                className="min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/8 hover:bg-white/15 text-slate-200 flex items-center gap-1 cursor-pointer"
+                className="min-h-[28px] sm:min-h-[36px] px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-white/8 hover:bg-white/15 text-slate-200 flex items-center gap-1 cursor-pointer"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
+                <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                 Reset
               </button>
             </div>
           </div>
 
           {/* Real-Time Stockfish Principal Variation (PV) Line */}
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#061020]/70 border border-white/10 font-mono-tabular text-xs">
-            <div className="flex items-center gap-2 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#061020]/70 border border-white/10 font-mono-tabular text-[10px] sm:text-xs">
+            <div className="flex items-center gap-1.5 min-w-0">
               <span className="text-[#26E6DE] font-bold shrink-0">
-                Stockfish Line (d{engineEval.depth}):
+                Line (d{engineEval.depth}):
               </span>
               <span className="text-slate-200 truncate">
                 {engineEval.pvSan.length > 0
@@ -600,15 +599,15 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
                   : engineEval.bestMoveSan}
               </span>
             </div>
-            <span className="text-[11px] text-slate-400 shrink-0">
-              {engineEval.isComputing ? 'Calculating...' : 'Synchronized'}
+            <span className="text-[10px] text-slate-400 shrink-0">
+              {engineEval.isComputing ? 'Thinking...' : 'Synced'}
             </span>
           </div>
 
           {/* Evaluation Bar + 8x8 Legal Board */}
           <div className="flex items-stretch justify-center gap-2 sm:gap-4">
             <div
-              className="w-6 sm:w-8 rounded-xl overflow-hidden bg-[#1E293B] border border-white/20 flex flex-col justify-end relative shrink-0"
+              className="w-5 sm:w-8 rounded-lg sm:rounded-xl overflow-hidden bg-[#1E293B] border border-white/20 flex flex-col justify-end relative shrink-0"
               title={`Stockfish Evaluation (Depth ${engineEval.depth}): ${formattedScoreText}`}
             >
               <div
@@ -616,7 +615,7 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
                 style={{ height: `${whiteEvalHeight}%` }}
               />
               <span
-                className={`absolute top-2 left-0 right-0 text-center text-[9px] sm:text-[10px] font-mono-tabular font-extrabold ${
+                className={`absolute top-1.5 left-0 right-0 text-center text-[8px] sm:text-[10px] font-mono-tabular font-extrabold ${
                   whiteEvalHeight > 85 ? 'text-slate-900' : 'text-white'
                 }`}
               >
@@ -624,7 +623,7 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
               </span>
             </div>
 
-            <div className="w-full max-w-[318px] sm:max-w-[440px] aspect-square rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl grid grid-cols-8 grid-rows-8">
+            <div className="w-full max-w-[264px] sm:max-w-[440px] aspect-square rounded-xl sm:rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl grid grid-cols-8 grid-rows-8">
               {displayRows.map((row, displayR) => {
                 const actualR = flipped ? 7 - displayR : displayR;
                 const displayCols = flipped ? [...row].reverse() : row;
@@ -698,8 +697,8 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
           </div>
 
           {/* Step Navigation Controls + Move List */}
-          <div className="space-y-3 pt-1">
-            <div className="flex items-center justify-between gap-2 bg-[#061020]/80 p-2 rounded-xl border border-white/10">
+          <div className="space-y-2.5 sm:space-y-3 pt-1">
+            <div className="flex items-center justify-between gap-1.5 bg-[#061020]/80 p-1.5 sm:p-2 rounded-xl border border-white/10">
               <div className="flex items-center gap-1">
                 <button
                   type="button"
@@ -708,7 +707,7 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
                     setSelectedSquare(null);
                   }}
                   disabled={plyIndex === 0}
-                  className="min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-40 cursor-pointer"
+                  className="min-h-[30px] sm:min-h-[36px] px-2 sm:px-2.5 py-1 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-40 cursor-pointer"
                   title="First move"
                 >
                   <SkipBack className="w-3.5 h-3.5" />
@@ -720,7 +719,7 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
                     setSelectedSquare(null);
                   }}
                   disabled={plyIndex === 0}
-                  className="min-h-[36px] px-3 py-1 rounded-lg text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-40 flex items-center gap-1 cursor-pointer"
+                  className="min-h-[30px] sm:min-h-[36px] px-2 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-40 flex items-center gap-1 cursor-pointer"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" /> Prev
                 </button>
@@ -731,7 +730,7 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
                     setSelectedSquare(null);
                   }}
                   disabled={plyIndex >= fenHistory.length - 1}
-                  className="min-h-[36px] px-3 py-1 rounded-lg text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-40 flex items-center gap-1 cursor-pointer"
+                  className="min-h-[30px] sm:min-h-[36px] px-2 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-40 flex items-center gap-1 cursor-pointer"
                 >
                   Next <ChevronRight className="w-3.5 h-3.5" />
                 </button>
@@ -742,14 +741,14 @@ export const ChessboardStudio: React.FC<ChessboardStudioProps> = ({
                     setSelectedSquare(null);
                   }}
                   disabled={plyIndex >= fenHistory.length - 1}
-                  className="min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-40 cursor-pointer"
+                  className="min-h-[30px] sm:min-h-[36px] px-2 sm:px-2.5 py-1 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-40 cursor-pointer"
                   title="Latest move"
                 >
                   <SkipForward className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <span className="text-xs font-mono-tabular text-slate-400 pr-2">
-                Ply {plyIndex} / {sanHistory.length}
+              <span className="text-[10px] sm:text-xs font-mono-tabular text-slate-400 pr-1.5">
+                {plyIndex}/{sanHistory.length}
               </span>
             </div>
 

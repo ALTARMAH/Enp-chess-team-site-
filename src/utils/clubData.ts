@@ -158,8 +158,7 @@ export interface ClubMember {
   name: string;
   arabicName: string;
   username: string;
-  passwordCode: string;
-  email?: string;
+  authUid?: string;
   role: UserRole;
   /**
    * Club organizational division / role (IT, COMM, Coaching, Events, Logistics, Relex, etc.)
@@ -380,6 +379,7 @@ export interface LoggedClubGame {
   pgn: string;
   status: 'approved' | 'pending';
   submittedBy?: string;
+  submittedByUid?: string;
   whiteEloDelta?: number;
   blackEloDelta?: number;
   tournamentId?: string;
@@ -443,9 +443,12 @@ export interface ClubChatMessage {
   channelId: string;
   channelType: 'team' | 'dm';
   senderId: string;
+  senderAuthUid?: string;
   senderName: string;
   senderRole: UserRole;
   recipientId?: string;
+  recipientAuthUid?: string;
+  participantAuthUids?: string[];
   text: string;
   challengeTimeControl?: TimeControl;
   challengeStakes?: MatchStakes;
@@ -694,8 +697,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Fethallah (Club Founder)',
     arabicName: 'فتح الله — مؤسس النادي',
     username: 'fethallah',
-    passwordCode: 'enp-owner-2026',
-    email: 'fethallah2411@gmail.com',
     role: 'owner',
     clubRoleDivision: 'President & Founder',
     chessSpecialty: 'Tactical Attacker & Sacrifices',
@@ -754,8 +755,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Boureghda Yasser',
     arabicName: 'بورغدة ياسر',
     username: 'yasser',
-    passwordCode: 'enp2026',
-    email: 'yasser.boureghda@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Positional & Workshop Player',
@@ -801,8 +800,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Hammada Ahmed Wadjih',
     arabicName: 'حمادة أحمد وجيه',
     username: 'wadjih',
-    passwordCode: 'enp2026',
-    email: 'wadjih.hammada@gmail.com',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Tactical Attacker & Sacrifices',
@@ -849,8 +846,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Yessaad Yanis Faycel',
     arabicName: 'يسعد يانيس فيصل',
     username: 'yanis',
-    passwordCode: 'enp2026',
-    email: 'faycel_yanis.yessaad@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Rapid & Blitz Speed Specialist',
@@ -897,8 +892,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Taleb Aramis',
     arabicName: 'طالب أراميس',
     username: 'aramis',
-    passwordCode: 'enp2026',
-    email: 'aramis.taleb@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Positional Grinder & Endgame Specialist',
@@ -944,8 +937,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Mazouzi Mohamed',
     arabicName: 'مازوزي محمد',
     username: 'mazouzi',
-    passwordCode: 'enp2026',
-    email: 'mazouzim153@gmail.com',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Opening Theoretician & Prep Lead',
@@ -992,8 +983,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Harrat Mohamed Wail',
     arabicName: 'حراث محمد وائل',
     username: 'wail',
-    passwordCode: 'enp2026',
-    email: 'mohamed_wail.harrat@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Tactical Attacker & Sacrifices',
@@ -1040,8 +1029,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Farah Daoud',
     arabicName: 'فرح داود',
     username: 'farah',
-    passwordCode: 'enp2026',
-    email: 'daoud.farah@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Dynamic Counter-Attacker',
@@ -1088,8 +1075,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Tarek Meriem',
     arabicName: 'طارق مريم',
     username: 'daakkiii',
-    passwordCode: 'enp2026',
-    email: 'meriem.tarek@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Positional Grinder & Endgame Specialist',
@@ -1136,8 +1121,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Youcef Khoudja Younes',
     arabicName: 'يوسف خوجة يونس',
     username: 'younes',
-    passwordCode: 'enp2026',
-    email: 'younes.youcef_khoudja@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Rapid & Blitz Speed Specialist',
@@ -1184,8 +1167,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Houari Ouassim',
     arabicName: 'هواري وسيم',
     username: 'ouassim',
-    passwordCode: 'enp2026',
-    email: 'ouassim.houari@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Solid Classical Defender',
@@ -1232,8 +1213,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Khelifi Yasmine Malak',
     arabicName: 'خليفي ياسمين ملاك',
     username: 'yasmine',
-    passwordCode: 'enp2026',
-    email: 'yssmxne3@gmail.com',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Rising Tactical Contender',
@@ -1280,8 +1259,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Belaidouni Romaissa',
     arabicName: 'بلعيدوني رميساء',
     username: 'romaissa',
-    passwordCode: 'enp2026',
-    email: 'romaissa.belaidouni@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Dynamic Counter-Attacker',
@@ -1328,8 +1305,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Esma Boulkhessaim',
     arabicName: 'أسماء بولخصايم',
     username: 'esma',
-    passwordCode: 'enp2026',
-    email: 'esma.boulkhessaim@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Opening Theoretician & Prep Lead',
@@ -1375,8 +1350,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Remili Mohanned',
     arabicName: 'رميلي مهند',
     username: 'mohanned',
-    passwordCode: 'enp2026',
-    email: 'mohanned.remili@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Solid Classical Defender',
@@ -1423,8 +1396,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Meradci Fatima Zohra',
     arabicName: 'مرادسي فاطمة الزهراء',
     username: 'fatima_m',
-    passwordCode: 'enp2026',
-    email: 'fatima_zohra.meradci@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Workshop & Endgame Student',
@@ -1470,8 +1441,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Mouatez Arib Chaib',
     arabicName: 'معتز عريب شايب',
     username: 'wharko',
-    passwordCode: 'enp2026',
-    email: 'mouatez_arib.chaib@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Rising Tactical Contender',
@@ -1518,8 +1487,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Anis Bouzegza',
     arabicName: 'أنيس بوزقزة',
     username: 'wplayer2',
-    passwordCode: 'enp2026',
-    email: 'anis.bouzegza@gmail.com',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Tactical Attacker & Sacrifices',
@@ -1566,8 +1533,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Rayane Sellal',
     arabicName: 'ريان سلال',
     username: 'rayane',
-    passwordCode: 'enp2026',
-    email: 'rayanesellal97@gmail.com',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Rapid & Blitz Speed Specialist',
@@ -1613,8 +1578,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Hadjab Abdelhakim',
     arabicName: 'حجاب عبد الحكيم',
     username: 'abhakim07',
-    passwordCode: 'enp2026',
-    email: 'aidhadjab23@gmail.com',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Rising Tactical Contender',
@@ -1661,8 +1624,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Bouokka Abderrahmen',
     arabicName: 'بوعكة عبد الرحمان',
     username: 'abderrahmen',
-    passwordCode: 'enp2026',
-    email: 'abderrahmen.bouokka@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Tactical Attacker & Sacrifices',
@@ -1708,8 +1669,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Ouzlifi Fatima Zahra',
     arabicName: 'أوزليفي فاطمة الزهراء',
     username: 'fatima_o',
-    passwordCode: 'enp2026',
-    email: 'fatima_zahra.ouzlifi@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Positional Grinder & Endgame Specialist',
@@ -1755,8 +1714,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Choura Salsabil',
     arabicName: 'شورة سلسبيل',
     username: 'salsabil',
-    passwordCode: 'enp2026',
-    email: 'Salsabil.choura@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Solid Classical Defender',
@@ -1803,8 +1760,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Mahamdioua Ala Eddine',
     arabicName: 'محمديوة علاء الدين',
     username: 'aladdin',
-    passwordCode: 'enp2026',
-    email: 'ala_eddine.mahamdioua@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Tactical Attacker & Sacrifices',
@@ -1851,8 +1806,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Rahmoune Adam',
     arabicName: 'رحمون آدم',
     username: 'ad_rahmoune',
-    passwordCode: 'enp2026',
-    email: 'Adam.rahmoune@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Rising Tactical Contender',
@@ -1899,8 +1852,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Medbal Tinhinane',
     arabicName: 'مدبال تينهنان',
     username: 'tinamedbal',
-    passwordCode: 'enp2026',
-    email: 'tinhinane.medbal@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Solid Classical Defender',
@@ -1947,8 +1898,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Seghir Soumia',
     arabicName: 'صغير سمية',
     username: 'soumia',
-    passwordCode: 'enp2026',
-    email: 'soumia.seghir@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Rising Tactical Contender',
@@ -1995,8 +1944,6 @@ export const INITIAL_MEMBERS: ClubMember[] = [
     name: 'Medjdoub Maram',
     arabicName: 'مجدوب مرام',
     username: 'maram',
-    passwordCode: 'enp2026',
-    email: 'maram.medjdoub@g.enp.edu.dz',
     role: 'member',
     clubRoleDivision: 'Club Member',
     chessSpecialty: 'Positional Grinder & Endgame Specialist',

@@ -316,46 +316,46 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
   };
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-4">
+      <div className="flex flex-wrap items-end justify-between gap-2.5 sm:gap-4 border-b border-white/10 pb-3 sm:pb-4">
         <div>
-          <span className="text-xs font-mono-tabular text-[#26E6DE] tracking-wider uppercase">
-            MY TEAM CHAT ({myTeamName.toUpperCase()}) · CROSS-TEAM PRIVATE 1-ON-1 DMs · QUICK RESULT LOGGER
+          <span className="text-[10px] sm:text-xs font-mono-tabular text-[#26E6DE] tracking-wider uppercase">
+            {myTeamName.toUpperCase()} CHANNELS · 1-ON-1 DMs · RESULT LOGGER
           </span>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">
-            {myTeamName} — Team Channels & Cross-Team Private Chat
+          <h2 className="text-lg sm:text-3xl font-extrabold text-white mt-0.5 sm:mt-1">
+            {myTeamName} — Team &amp; Private Chat
           </h2>
-          <p className="text-xs text-slate-300 mt-1">
-            Signed in as <strong className="text-white">{currentUser.name}</strong> ({myTeamName}). You only have access to <strong className="text-[#FF6B00]">{myTeamName}</strong> internal team channels, and you can message players from <strong className="text-[#26E6DE]">any university team</strong> in private 1-on-1 DMs.
+          <p className="text-[11px] sm:text-xs text-slate-300 mt-0.5 sm:mt-1">
+            Signed in as <strong className="text-white">{currentUser.name}</strong> ({myTeamName}).
           </p>
         </div>
 
         <button
           type="button"
           onClick={onOpenStudioBoard}
-          className="px-4 py-2 rounded-xl bg-[#1E56A0] hover:bg-[#FF6B00] text-white text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+          className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg sm:rounded-xl bg-[#1E56A0] hover:bg-[#FF6B00] text-white text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
         >
-          <Swords className="w-4 h-4" />
-          <span>Open Analysis Board Studio</span>
+          <Swords className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <span>Board Studio</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
         {/* Left 3 Cols: Scoped Home Team Channels + Cross-Team Direct Message Directory */}
-        <div className="lg:col-span-3 broadcast-panel rounded-2xl p-4 space-y-5">
+        <div className="lg:col-span-3 broadcast-panel rounded-2xl p-3 sm:p-4 space-y-3.5 sm:space-y-5">
           {/* Team Channels (Strictly Scoped to currentUser.clubId) */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between px-2">
-              <span className="text-[11px] font-mono-tabular uppercase tracking-wider text-[#FF6B00] font-bold">
-                My Team Only ({getShortTeamTag(currentUser.clubId)})
+          <div className="space-y-1.5 sm:space-y-2">
+            <div className="flex items-center justify-between px-1 sm:px-2">
+              <span className="text-[10px] sm:text-[11px] font-mono-tabular uppercase tracking-wider text-[#FF6B00] font-bold">
+                My Team ({getShortTeamTag(currentUser.clubId)})
               </span>
               <Users className="w-3.5 h-3.5 text-[#FF6B00]" />
             </div>
-            <div className="px-2 pb-1 text-[11px] text-slate-400">
-              Private to {myTeamName} squad members.Other teams cannot view these channels.
+            <div className="px-1 sm:px-2 pb-0.5 text-[10px] sm:text-[11px] text-slate-400">
+              Private to {myTeamName} squad members.
             </div>
-            <div className="space-y-1">
+            <div className="grid grid-cols-3 lg:grid-cols-1 gap-1">
               {TEAM_CHANNELS.map((ch) => {
                 const isSelected = !activeDmMemberId && activeChannelId === ch.id;
                 return (
@@ -363,17 +363,17 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
                     key={ch.id}
                     type="button"
                     onClick={() => selectTeamChannel(ch.id)}
-                    className={`w-full px-3 py-2.5 rounded-xl text-left flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                    className={`w-full px-2 sm:px-3 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-left flex items-center justify-between gap-1 transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-[#FF6B00] text-white font-bold shadow-md'
                         : 'text-slate-300 hover:bg-white/8 hover:text-white'
                     }`}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Hash className="w-4 h-4 shrink-0 opacity-80" />
-                      <div className="text-xs truncate">{ch.name}</div>
+                    <div className="flex items-center gap-1 min-w-0">
+                      <Hash className="w-3 h-3 sm:w-4 sm:h-4 shrink-0 opacity-80" />
+                      <div className="text-[10px] sm:text-xs truncate">{ch.name}</div>
                     </div>
-                    <span className="px-1.5 py-0.5 rounded bg-black/30 text-[9px] font-mono-tabular uppercase shrink-0">
+                    <span className="hidden sm:inline px-1.5 py-0.5 rounded bg-black/30 text-[9px] font-mono-tabular uppercase shrink-0">
                       {getShortTeamTag(currentUser.clubId)}
                     </span>
                   </button>
@@ -383,10 +383,10 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
           </div>
 
           {/* Private 1-on-1 Direct Messages (Across All Teams!) */}
-          <div className="space-y-2.5 pt-3 border-t border-white/10">
-            <div className="flex items-center justify-between px-2">
-              <span className="text-[11px] font-mono-tabular uppercase tracking-wider text-[#26E6DE] font-bold">
-                Private 1-on-1 DMs (All Teams)
+          <div className="space-y-2 pt-2.5 sm:pt-3 border-t border-white/10">
+            <div className="flex items-center justify-between px-1 sm:px-2">
+              <span className="text-[10px] sm:text-[11px] font-mono-tabular uppercase tracking-wider text-[#26E6DE] font-bold">
+                Private DMs
               </span>
               <Globe className="w-3.5 h-3.5 text-[#26E6DE]" />
             </div>
@@ -424,11 +424,11 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Other Teams
+                Others
               </button>
             </div>
 
-            <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
+            <div className="space-y-1 max-h-[190px] sm:max-h-[320px] overflow-y-auto pr-1">
               {filteredDmContacts.map((m) => {
                 const isSelected = activeDmMemberId === m.id;
                 const isSameTeam = m.clubId === currentUser.clubId;
@@ -438,15 +438,15 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
                     key={m.id}
                     type="button"
                     onClick={() => selectPrivateDm(m)}
-                    className={`w-full p-2.5 rounded-xl text-left flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                    className={`w-full p-2 sm:p-2.5 rounded-lg sm:rounded-xl text-left flex items-center justify-between gap-2 transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-[#1E56A0] text-white font-bold shadow'
                         : 'bg-[#061020]/60 hover:bg-white/10 text-slate-200 border border-white/5'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
                       <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-extrabold text-white shrink-0 overflow-hidden"
+                        className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-[10px] sm:text-xs font-extrabold text-white shrink-0 overflow-hidden"
                         style={{ backgroundColor: m.avatarColor }}
                       >
                         {m.avatarUrl ? (
@@ -461,10 +461,10 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
                         )}
                       </div>
                       <div className="min-w-0">
-                        <div className="text-xs font-bold truncate flex items-center gap-1.5">
+                        <div className="text-[11px] sm:text-xs font-bold truncate flex items-center gap-1">
                           <span className="truncate">{m.name}</span>
                           <span
-                            className={`px-1.5 py-0.2 rounded text-[9px] font-mono-tabular uppercase shrink-0 ${
+                            className={`px-1 py-0.2 rounded text-[8px] sm:text-[9px] font-mono-tabular uppercase shrink-0 ${
                               isSameTeam
                                 ? 'bg-white/15 text-white'
                                 : 'bg-[#FF6B00]/25 text-[#FF6B00] border border-[#FF6B00]/40'
@@ -473,9 +473,9 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
                             {getShortTeamTag(m.clubId)}
                           </span>
                         </div>
-                        <div className="text-[10px] font-mono-tabular text-slate-400 truncate">
+                        <div className="text-[9px] sm:text-[10px] font-mono-tabular text-slate-400 truncate">
                           {m.fide.rapid} Rapid ·{' '}
-                          {isAvailable ? 'Online / Campus' : 'In Class'}
+                          {isAvailable ? 'Online' : 'In Class'}
                         </div>
                       </div>
                     </div>
@@ -487,41 +487,39 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
         </div>
 
         {/* Center 5 Cols: Live Chat Stream & Match Challenge Composer */}
-        <div className="lg:col-span-5 broadcast-panel rounded-2xl flex flex-col h-[580px] overflow-hidden">
+        <div className="lg:col-span-5 broadcast-panel rounded-2xl flex flex-col h-[390px] sm:h-[580px] overflow-hidden">
           {/* Active Channel Header */}
-          <div className="p-4 border-b border-white/10 bg-[#061020]/80 flex items-center justify-between gap-3">
+          <div className="p-2.5 sm:p-4 border-b border-white/10 bg-[#061020]/80 flex items-center justify-between gap-2">
             <div className="min-w-0">
               {activeDmMember ? (
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2">
                   <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0"
+                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-[10px] sm:text-xs font-bold text-white shrink-0"
                     style={{ backgroundColor: activeDmMember.avatarColor }}
                   >
                     {activeDmMember.avatarInitials}
                   </div>
-                  <div>
-                    <div className="text-sm font-bold text-white flex items-center gap-2">
-                      <span>Private 1-on-1 with {activeDmMember.name}</span>
-                      <span className="px-2 py-0.5 rounded bg-[#FF6B00]/20 border border-[#FF6B00]/40 text-[#FF6B00] text-[10px] font-mono-tabular uppercase">
-                        {activeDmMember.clubId === currentUser.clubId
-                          ? 'Teammate'
-                          : `Cross-Team (${activeDmMember.university})`}
+                  <div className="min-w-0">
+                    <div className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 truncate">
+                      <span className="truncate">{activeDmMember.name}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-[#FF6B00]/20 border border-[#FF6B00]/40 text-[#FF6B00] text-[9px] sm:text-[10px] font-mono-tabular uppercase shrink-0">
+                        {activeDmMember.clubId === currentUser.clubId ? 'Teammate' : 'DM'}
                       </span>
                     </div>
-                    <div className="text-[11px] font-mono-tabular text-[#26E6DE]">
-                      {activeDmMember.department} · {activeDmMember.fide.rapid} Rapid Elo
+                    <div className="text-[10px] sm:text-[11px] font-mono-tabular text-[#26E6DE] truncate">
+                      {activeDmMember.fide.rapid} Rapid Elo
                     </div>
                   </div>
                 </div>
               ) : (
-                <div>
-                  <div className="text-sm font-bold text-white flex items-center gap-1.5">
-                    <Hash className="w-4 h-4 text-[#FF6B00]" />
-                    <span>
-                      {activeTeamChannel.name} ({myTeamName} Only)
+                <div className="min-w-0">
+                  <div className="text-xs sm:text-sm font-bold text-white flex items-center gap-1 truncate">
+                    <Hash className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#FF6B00] shrink-0" />
+                    <span className="truncate">
+                      {activeTeamChannel.name}
                     </span>
                   </div>
-                  <div className="text-xs text-slate-400 truncate">
+                  <div className="text-[10px] sm:text-xs text-slate-400 truncate">
                     {activeTeamChannel.description}
                   </div>
                 </div>
@@ -531,29 +529,29 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
             <button
               type="button"
               onClick={() => setAttachChallenge((v) => !v)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${
+              className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold flex items-center gap-1 shrink-0 transition-colors cursor-pointer ${
                 attachChallenge
                   ? 'bg-[#26E6DE] text-[#061020]'
                   : 'bg-white/10 hover:bg-white/15 text-[#26E6DE]'
               }`}
             >
-              <Swords className="w-3.5 h-3.5" />
-              <span>{attachChallenge ? 'Challenge Attached' : '+ Challenge to Play'}</span>
+              <Swords className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span>{attachChallenge ? 'Attached' : '+ Challenge'}</span>
             </button>
           </div>
 
           {/* Messages Scroll Area */}
-          <div className="flex-1 p-4 overflow-y-auto space-y-3">
+          <div className="flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-2.5 sm:space-y-3">
             {visibleMessages.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 space-y-2">
-                <MessageSquare className="w-8 h-8 text-[#26E6DE]/60" />
-                <div className="text-sm font-bold text-white">
+              <div className="h-full flex flex-col items-center justify-center text-center p-4 sm:p-6 text-slate-400 space-y-1.5">
+                <MessageSquare className="w-6 h-6 sm:w-8 sm:h-8 text-[#26E6DE]/60" />
+                <div className="text-xs sm:text-sm font-bold text-white">
                   {activeDmMember
-                    ? `Start a private 1-on-1 conversation with ${activeDmMember.name} (${activeDmMember.university})`
-                    : `No messages in #${activeTeamChannel.name} for ${myTeamName} yet`}
+                    ? `Message ${activeDmMember.name}`
+                    : `No messages in #${activeTeamChannel.name} yet`}
                 </div>
-                <p className="text-xs max-w-xs">
-                  Send a message or attach a Friendly / Competitive match invitation below!
+                <p className="text-[11px] sm:text-xs max-w-xs">
+                  Send a message or attach a match invitation below.
                 </p>
               </div>
             ) : (
@@ -564,17 +562,17 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
                     key={msg.id}
                     className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
                   >
-                    <div className="flex items-center gap-2 mb-1 px-1">
-                      <span className="text-[11px] font-bold text-slate-300">
+                    <div className="flex items-center gap-1.5 mb-0.5 px-1">
+                      <span className="text-[10px] sm:text-[11px] font-bold text-slate-300">
                         {msg.senderName}
                       </span>
-                      <span className="text-[10px] font-mono-tabular text-slate-500">
+                      <span className="text-[9px] sm:text-[10px] font-mono-tabular text-slate-500">
                         {msg.createdAt}
                       </span>
                     </div>
 
                     <div
-                      className={`max-w-[88%] rounded-2xl p-3.5 text-xs leading-relaxed space-y-2.5 ${
+                      className={`max-w-[90%] rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 text-[11px] sm:text-xs leading-snug sm:leading-relaxed space-y-2 ${
                         isMe
                           ? 'bg-[#1E56A0] text-white rounded-br-none'
                           : 'bg-[#061020]/90 border border-white/10 text-slate-100 rounded-bl-none'
@@ -583,19 +581,19 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
                       <p>{msg.text}</p>
 
                       {msg.challengeTimeControl && (
-                        <div className="p-3 rounded-xl bg-[#040B16]/90 border border-[#26E6DE]/40 flex flex-wrap items-center justify-between gap-2">
+                        <div className="p-2.5 sm:p-3 rounded-lg sm:rounded-xl bg-[#040B16]/90 border border-[#26E6DE]/40 flex flex-wrap items-center justify-between gap-2">
                           <div className="space-y-0.5">
-                            <div className="text-[10px] font-mono-tabular uppercase text-[#26E6DE] font-bold flex items-center gap-1">
+                            <div className="text-[9px] sm:text-[10px] font-mono-tabular uppercase text-[#26E6DE] font-bold flex items-center gap-1">
                               <Swords className="w-3 h-3" />
                               <span>
                                 {msg.challengeStakes || 'friendly'} ·{' '}
-                                {msg.challengeTimeControl.toUpperCase()} MATCH INVITE
+                                {msg.challengeTimeControl.toUpperCase()}
                               </span>
                             </div>
-                            <div className="text-[11px] text-slate-300">
+                            <div className="text-[10px] sm:text-[11px] text-slate-300">
                               {msg.challengeStakes === 'friendly'
-                                ? 'Friendly Game (0.45x Light Elo Impact)'
-                                : 'Competitive Club Match (1.0x Full Elo)'}
+                                ? 'Friendly (0.45x Elo)'
+                                : 'Competitive (1.0x Elo)'}
                             </div>
                           </div>
 

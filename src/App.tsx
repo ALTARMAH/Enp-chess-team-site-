@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ClubChatMessage,
   ClubGenerationRecord,
@@ -39,9 +39,30 @@ import { FreeHourRadar } from './components/FreeHourRadar';
 import { ClubChatHub } from './components/ClubChatHub';
 import { ClubCustomizerSpec } from './components/ClubCustomizerSpec';
 import { ClubLogoBadge } from './components/ClubLogoBadge';
-import { auth, db, googleProvider } from './firebase';
-import { signInWithPopup, signOut } from 'firebase/auth';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import {
+  auth,
+  db,
+  googleProvider,
+  buildClubAuthEmail,
+  provisionClubMemberAuthAccount,
+  OperationType,
+  handleFirestoreError,
+  stripUndefined,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  fbSignOut,
+  doc,
+  getDoc,
+  setDoc,
+  deleteDoc,
+  collection,
+  onSnapshot,
+  query,
+  where,
+  writeBatch,
+  User,
+} from './firebase';
 import {
   LayoutDashboard,
   Users,
@@ -59,7 +80,6 @@ import {
   Megaphone,
   PlusCircle,
   CheckCircle2,
-  Key,
   Lock,
   Sun,
   Moon,
@@ -210,12 +230,17 @@ export default function App() {
   );
   const [initialDmTargetId, setInitialDmTargetId] = useState<string | null>(null);
 
-  // Auth & Role State (Default to Owner so user can immediately test all features, with 1-click Login/Role Switcher)
-  const [currentUserId, setCurrentUserId] = useState<string | null>('enp-owner');
+  // Auth & Role State (Guest Read-Only by default; verified via Firebase Club Account or Google Auth)
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [isCloudSynced, setIsCloudSynced] = useState<boolean>(false);
+  const [cloudClubExists, setCloudClubExists] = useState<boolean>(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [loginError, setLoginError] = useState<string>('');
   const [loginUsername, setLoginUsername] = useState<string>('');
   const [loginPassword, setLoginPassword] = useState<string>('');
-  const [loginError, setLoginError] = useState<string>('');
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const isSeedingRef = useRef<boolean>(false);
 
   // Quick Home Post Modal State (for Admins on Overview)
   const [isQuickPostModalOpen, setIsQuickPostModalOpen] = useState<boolean>(false);
@@ -262,43 +287,367 @@ export default function App() {
     }
   }, [clubConfig]);
 
-  // Helper to persist to Firestore best-effort when authenticated
+  // Helpers to persist / delete in Firestore with structured error tracking
   const syncDocToFirestore = async (
     collectionPath: string,
     docId: string,
     data: Record<string, unknown>
   ) => {
+    if (!auth.currentUser) return;
     try {
-      if (auth.currentUser) {
-        await setDoc(doc(db, collectionPath, docId), data, { merge: true });
-      }
-    } catch {
-      // fallback to local state when using club username/password session
+      const cleanData = stripUndefined(data) as Record<string, unknown>;
+      await setDoc(doc(db, collectionPath, docId), cleanData, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${docId}`);
     }
   };
 
-  // --- AUTHENTICATION HANDLERS ---
-  const handleCredentialLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    const u = loginUsername.trim().toLowerCase();
-    const p = loginPassword.trim();
-    const found = members.find(
-      (m) => m.username.toLowerCase() === u && m.passwordCode === p
-    );
-    if (!found) {
-      setLoginError('Invalid username or password code. Check credentials or use Quick Switch below.');
+  const deleteDocFromFirestore = async (collectionPath: string, docId: string) => {
+    if (!auth.currentUser) return;
+    try {
+      await deleteDoc(doc(db, collectionPath, docId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `${collectionPath}/${docId}`);
+    }
+  };
+
+  // Seed or re-sync current active club data into Firestore (Owner only)
+  // Writes parent /clubs/{clubId} document FIRST so subcollection clubExists() gates always succeed cleanly.
+  const seedClubToFirestore = async (overrideOwnerUid?: string) => {
+    const activeUid = overrideOwnerUid || auth.currentUser?.uid;
+    if (!activeUid || isSeedingRef.current) return;
+    isSeedingRef.current = true;
+    const targetClubId = clubConfig.clubId;
+    const now = new Date().toISOString();
+    try {
+      // Step 1: Commit parent club document first
+      await setDoc(
+        doc(db, 'clubs', targetClubId),
+        stripUndefined({
+          ...clubConfig,
+          createdByUid: activeUid,
+          updatedAt: now,
+        }),
+        { merge: true }
+      );
+
+      // Step 2: Queue subcollection documents in safe batches (< 400 writes each)
+      const ops: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = [];
+
+      for (const m of members.filter((x) => x.clubId === targetClubId)) {
+        ops.push({
+          ref: doc(db, `clubs/${targetClubId}/members`, m.id),
+          data: stripUndefined({
+            ...m,
+            authUid: m.id === 'enp-owner' ? activeUid : m.authUid,
+            updatedAt: now,
+          }) as Record<string, unknown>,
+        });
+      }
+      for (const p of posts.filter((x) => x.clubId === targetClubId)) {
+        ops.push({
+          ref: doc(db, `clubs/${targetClubId}/posts`, p.id),
+          data: stripUndefined(p) as unknown as Record<string, unknown>,
+        });
+      }
+      for (const t of tournaments.filter((x) => x.clubId === targetClubId)) {
+        ops.push({
+          ref: doc(db, `clubs/${targetClubId}/tournaments`, t.id),
+          data: stripUndefined(t) as unknown as Record<string, unknown>,
+        });
+      }
+      for (const g of loggedGames.filter((x) => x.clubId === targetClubId)) {
+        ops.push({
+          ref: doc(db, `clubs/${targetClubId}/games`, g.id),
+          data: stripUndefined(g) as unknown as Record<string, unknown>,
+        });
+      }
+      for (const l of ownershipLineage.filter((x) => x.clubId === targetClubId)) {
+        ops.push({
+          ref: doc(db, `clubs/${targetClubId}/lineage`, l.id),
+          data: stripUndefined(l) as unknown as Record<string, unknown>,
+        });
+      }
+
+      for (let i = 0; i < ops.length; i += 350) {
+        const batch = writeBatch(db);
+        const chunk = ops.slice(i, i + 350);
+        chunk.forEach((op) => batch.set(op.ref, op.data, { merge: true }));
+        await batch.commit();
+      }
+
+      setCloudClubExists(true);
+      setIsCloudSynced(true);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `clubs/${targetClubId}`);
+    } finally {
+      isSeedingRef.current = false;
+    }
+  };
+
+  // --- FIREBASE AUTH LISTENER ---
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      if (!user) {
+        setCurrentUserId(null);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Resolve active member profile cleanly whenever Firebase Auth user or members list updates
+  useEffect(() => {
+    if (!firebaseUser) {
+      setCurrentUserId(null);
       return;
     }
-    setCurrentUserId(found.id);
-    // Switch to the member's club if different
-    const memberClub = clubs.find((c) => c.clubId === found.clubId);
-    if (memberClub) {
-      setClubConfig(memberClub);
+    const email = firebaseUser.email?.toLowerCase() || '';
+    if (email === 'fethallah2411@gmail.com' && firebaseUser.emailVerified) {
+      setCurrentUserId('enp-owner');
+      return;
     }
-    setLoginUsername('');
-    setLoginPassword('');
+    const matched = members.find(
+      (m) => m.authUid === firebaseUser.uid || m.id === firebaseUser.uid
+    );
+    if (matched) {
+      setCurrentUserId(matched.id);
+      return;
+    }
+    if (email.endsWith('.enpchess.app')) {
+      const localPart = email.split('@')[0] || '';
+      const suffix = `.${clubConfig.clubId.toLowerCase()}`;
+      const uname = localPart.endsWith(suffix)
+        ? localPart.slice(0, -suffix.length)
+        : localPart.split('.')[0];
+      const byUsername = members.find(
+        (m) => m.clubId === clubConfig.clubId && m.username.toLowerCase() === uname
+      );
+      if (byUsername) {
+        setCurrentUserId(byUsername.id);
+      }
+    }
+  }, [firebaseUser?.uid, firebaseUser?.email, firebaseUser?.emailVerified, members, clubConfig.clubId]);
+
+  // Automatically bootstrap Firestore once when Owner signs in if club doc does not exist yet
+  useEffect(() => {
+    if (
+      !firebaseUser ||
+      firebaseUser.email?.toLowerCase() !== 'fethallah2411@gmail.com' ||
+      !firebaseUser.emailVerified
+    ) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'clubs', clubConfig.clubId));
+        if (!cancelled && !snap.exists()) {
+          await seedClubToFirestore(firebaseUser.uid);
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, `clubs/${clubConfig.clubId}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [firebaseUser?.uid, firebaseUser?.email, firebaseUser?.emailVerified, clubConfig.clubId]);
+
+  // --- TWO-WAY FIRESTORE REAL-TIME LISTENERS ---
+  useEffect(() => {
+    const clubsQ = query(collection(db, 'clubs'), where('startingRating', '>=', 400));
+    const unsubClubs = onSnapshot(
+      clubsQ,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const cloudClubs = snapshot.docs.map((d) => d.data() as ClubThemeConfig);
+          setClubs(cloudClubs);
+          const matchedActive = cloudClubs.find((c) => c.clubId === clubConfig.clubId);
+          setCloudClubExists(Boolean(matchedActive));
+          if (matchedActive) {
+            setClubConfig(matchedActive);
+          }
+          setIsCloudSynced(true);
+        }
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'clubs')
+    );
+    return () => unsubClubs();
+  }, [clubConfig.clubId]);
+
+  useEffect(() => {
+    const cid = clubConfig.clubId;
+    const unsubMembers = onSnapshot(
+      query(collection(db, `clubs/${cid}/members`), where('clubId', '==', cid)),
+      (snapshot) => {
+        if (!snapshot.empty || cloudClubExists) {
+          const loaded = snapshot.docs.map((d) => d.data() as ClubMember);
+          if (loaded.length > 0) {
+            setMembers((prev) => [...prev.filter((m) => m.clubId !== cid), ...loaded]);
+            setIsCloudSynced(true);
+            if (firebaseUser) {
+              const isFounder =
+                firebaseUser.email?.toLowerCase() === 'fethallah2411@gmail.com' &&
+                firebaseUser.emailVerified;
+              if (isFounder) {
+                const ownerDoc = loaded.find((m) => m.id === 'enp-owner');
+                if (ownerDoc) setCurrentUserId(ownerDoc.id);
+              } else {
+                const matched = loaded.find(
+                  (m) => m.authUid === firebaseUser.uid || m.id === firebaseUser.uid
+                );
+                if (matched) setCurrentUserId(matched.id);
+              }
+            }
+          }
+        }
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, `clubs/${cid}/members`)
+    );
+
+    const unsubGames = onSnapshot(
+      query(collection(db, `clubs/${cid}/games`), where('clubId', '==', cid)),
+      (snapshot) => {
+        if (!snapshot.empty || cloudClubExists) {
+          const loaded = snapshot.docs.map((d) => d.data() as LoggedClubGame);
+          setLoggedGames((prev) => [...prev.filter((g) => g.clubId !== cid), ...loaded]);
+        }
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, `clubs/${cid}/games`)
+    );
+
+    const unsubTournaments = onSnapshot(
+      query(collection(db, `clubs/${cid}/tournaments`), where('clubId', '==', cid)),
+      (snapshot) => {
+        if (!snapshot.empty || cloudClubExists) {
+          const loaded = snapshot.docs.map((d) => d.data() as ClubTournament);
+          setTournaments((prev) => [...prev.filter((t) => t.clubId !== cid), ...loaded]);
+        }
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, `clubs/${cid}/tournaments`)
+    );
+
+    const unsubPosts = onSnapshot(
+      query(collection(db, `clubs/${cid}/posts`), where('clubId', '==', cid)),
+      (snapshot) => {
+        if (!snapshot.empty || cloudClubExists) {
+          const loaded = snapshot.docs.map((d) => d.data() as ClubPost);
+          setPosts((prev) => [...prev.filter((p) => p.clubId !== cid), ...loaded]);
+        }
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, `clubs/${cid}/posts`)
+    );
+
+    const unsubLineage = onSnapshot(
+      query(collection(db, `clubs/${cid}/lineage`), where('clubId', '==', cid)),
+      (snapshot) => {
+        if (!snapshot.empty || cloudClubExists) {
+          const loaded = snapshot.docs.map((d) => d.data() as ClubGenerationRecord);
+          if (loaded.length > 0) {
+            setOwnershipLineage((prev) => [
+              ...prev.filter((l) => l.clubId !== cid),
+              ...loaded,
+            ]);
+          }
+        }
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, `clubs/${cid}/lineage`)
+    );
+
+    const unsubTeamMessages = onSnapshot(
+      query(
+        collection(db, `clubs/${cid}/messages`),
+        where('clubId', '==', cid),
+        where('channelType', '==', 'team')
+      ),
+      (snapshot) => {
+        if (!snapshot.empty || cloudClubExists) {
+          const teamMsgs = snapshot.docs.map((d) => d.data() as ClubChatMessage);
+          setChatMessages((prev) => {
+            const others = prev.filter((m) => m.clubId !== cid || m.channelType === 'dm');
+            return [...others, ...teamMsgs];
+          });
+        }
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, `clubs/${cid}/messages`)
+    );
+
+    let unsubDmMessages: (() => void) | null = null;
+    if (firebaseUser?.uid) {
+      unsubDmMessages = onSnapshot(
+        query(
+          collection(db, `clubs/${cid}/messages`),
+          where('clubId', '==', cid),
+          where('participantAuthUids', 'array-contains', firebaseUser.uid)
+        ),
+        (snapshot) => {
+          const dmMsgs = snapshot.docs.map((d) => d.data() as ClubChatMessage);
+          setChatMessages((prev) => {
+            const others = prev.filter((m) => m.clubId !== cid || m.channelType !== 'dm');
+            return [...others, ...dmMsgs];
+          });
+        },
+        (error) => handleFirestoreError(error, OperationType.LIST, `clubs/${cid}/messages`)
+      );
+    }
+
+    return () => {
+      unsubMembers();
+      unsubGames();
+      unsubTournaments();
+      unsubPosts();
+      unsubLineage();
+      unsubTeamMessages();
+      if (unsubDmMessages) unsubDmMessages();
+    };
+  }, [clubConfig.clubId, cloudClubExists, firebaseUser?.uid]);
+
+  // --- AUTHENTICATION HANDLERS ---
+  const handleClubAccountLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const rawUser = loginUsername.trim();
+    if (!rawUser || !loginPassword) {
+      setLoginError('Please enter both your Club Username and Password.');
+      return;
+    }
+    setIsLoggingIn(true);
     setLoginError('');
-    setIsAuthModalOpen(false);
+    try {
+      const loginEmail = buildClubAuthEmail(rawUser, clubConfig.clubId);
+      const cred = await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+      const cleanUname = rawUser.toLowerCase().replace(/^@+/, '');
+      const matched = members.find(
+        (m) =>
+          m.authUid === cred.user.uid ||
+          m.id === cred.user.uid ||
+          (m.clubId === clubConfig.clubId && m.username.toLowerCase() === cleanUname)
+      );
+      if (matched) {
+        setCurrentUserId(matched.id);
+      }
+      setLoginPassword('');
+      setIsAuthModalOpen(false);
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/operation-not-allowed') {
+        setLoginError(
+          'Email/Password login is not enabled in Firebase Console yet. Owner: open Firebase Console -> Authentication -> Sign-in method -> enable Email/Password, or use Google Sign-In below.'
+        );
+      } else if (
+        code === 'auth/invalid-credential' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/user-not-found'
+      ) {
+        setLoginError(
+          'Invalid club username or password. Ask a Club Admin to issue or verify your account credentials.'
+        );
+      } else {
+        setLoginError('Could not sign in with those credentials. Please check your username and password.');
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   const handleGoogleLogin = async () => {
@@ -306,73 +655,102 @@ export default function App() {
       setLoginError('');
       const cred = await signInWithPopup(auth, googleProvider);
       const email = cred.user.email?.toLowerCase();
-      if (email === 'fethallah2411@gmail.com') {
+      if (email === 'fethallah2411@gmail.com' && cred.user.emailVerified) {
         setCurrentUserId('enp-owner');
+        const clubSnap = await getDoc(doc(db, 'clubs', clubConfig.clubId));
+        if (!clubSnap.exists()) {
+          await seedClubToFirestore(cred.user.uid);
+        } else {
+          const ownerDoc = members.find((m) => m.id === 'enp-owner');
+          if (ownerDoc && ownerDoc.authUid !== cred.user.uid) {
+            const updatedOwner = { ...ownerDoc, authUid: cred.user.uid };
+            setMembers((prev) => prev.map((m) => (m.id === 'enp-owner' ? updatedOwner : m)));
+            await syncDocToFirestore(`clubs/${clubConfig.clubId}/members`, 'enp-owner', {
+              ...updatedOwner,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
       } else {
-        const matched = members.find((m) => m.email?.toLowerCase() === email);
+        const matched = members.find(
+          (m) => m.authUid === cred.user.uid || m.id === cred.user.uid
+        );
         if (matched) {
           setCurrentUserId(matched.id);
         } else {
-          // Create a new member profile for Google user in the active club
-          const newId = `google-${cred.user.uid.slice(0, 6)}`;
+          const newId = cred.user.uid;
+          const base = clubConfig.startingRating || 1200;
+          const baseHandle =
+            (cred.user.displayName || 'member')
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, '')
+              .slice(0, 20) || `player${newId.slice(0, 5)}`;
           const newMember: ClubMember = {
             id: newId,
             clubId: clubConfig.clubId,
+            authUid: cred.user.uid,
             name: cred.user.displayName || 'Club Member',
             arabicName: 'عضو نادي الشطرنج',
-            username: (cred.user.email?.split('@')[0] || 'member').toLowerCase(),
-            passwordCode: 'google-auth',
-            email: cred.user.email || undefined,
+            username: baseHandle,
             role: 'member',
+            clubRoleDivision: 'Club Member',
             university: clubConfig.universityName,
             department: 'Polytechnic Engineering',
             yearLevel: 'Ingénieur',
             titleBadge: 'Verified Member',
             liveStatus: 'online_ready',
-            bio: 'Signed in via Google Authentication.',
+            bio: 'Signed in via verified Google Account.',
             avatarUrl: cred.user.photoURL || undefined,
             avatarInitials: (cred.user.displayName || 'CM').slice(0, 2).toUpperCase(),
             avatarColor: clubConfig.accentColor,
             joinedDate: 'Nov 2026',
             fide: {
-              rapid: 1500,
-              blitz: 1500,
-              classical: 1500,
-              peak: 1500,
+              rapid: base,
+              blitz: base,
+              classical: base,
+              peak: base,
               delta30d: 0,
               gamesPlayed: 0,
             },
             glicko2: {
-              rapid: { rating: 1500, rd: 110, vol: 0.06 },
-              blitz: { rating: 1500, rd: 110, vol: 0.06 },
-              classical: { rating: 1500, rd: 110, vol: 0.06 },
+              rapid: { rating: base, rd: 220, vol: 0.06 },
+              blitz: { rating: base, rd: 220, vol: 0.06 },
+              classical: { rating: base, rd: 220, vol: 0.06 },
             },
             ratingHistory: [
               {
                 date: '2026-11',
-                event: 'Club Seed',
-                fide: 1500,
-                glicko: 1500,
+                event: 'Verified Google Onboarding',
+                fide: base,
+                glicko: base,
                 opponent: 'Baseline',
                 result: 'D',
+                timeControl: 'rapid',
               },
             ],
             openings: [],
-            freeSlots: ['0-11', '2-12'],
+            freeSlots: [],
           };
           setMembers((prev) => [newMember, ...prev]);
           setCurrentUserId(newId);
+          const clubSnap = await getDoc(doc(db, 'clubs', clubConfig.clubId));
+          if (clubSnap.exists()) {
+            await syncDocToFirestore(`clubs/${clubConfig.clubId}/members`, newId, {
+              ...newMember,
+              updatedAt: new Date().toISOString(),
+            });
+          }
         }
       }
       setIsAuthModalOpen(false);
     } catch {
-      setLoginError('Google Sign-In popup was closed or blocked. You can also sign in with Club Username & Password.');
+      setLoginError('Google Sign-In popup was closed or blocked. Please allow popups and try again.');
     }
   };
 
   const handleSignOut = async () => {
     try {
-      await signOut(auth);
+      await fbSignOut(auth);
     } catch {
       // ignore
     }
@@ -440,67 +818,75 @@ export default function App() {
     const whiteRes: 'W' | 'D' | 'L' = outcome === 1 ? 'W' : outcome === 0 ? 'L' : 'D';
     const blackRes: 'W' | 'D' | 'L' = outcome === 0 ? 'W' : outcome === 1 ? 'L' : 'D';
 
+    const nextWhiteOpenings = mergeMemberOpeningStat(white.openings, detectedOpening, 'white', whiteRes);
+    const updatedWhite: ClubMember = {
+      ...white,
+      openings: nextWhiteOpenings,
+      signatureOpening: nextWhiteOpenings[0]?.name || white.signatureOpening,
+      fide: {
+        ...white.fide,
+        [timeControl]: preview.whiteNew,
+        peak: Math.max(white.fide.peak, preview.whiteNew),
+        delta30d: white.fide.delta30d + preview.whiteDelta,
+        gamesPlayed: white.fide.gamesPlayed + 1,
+      },
+      ratingHistory: [
+        ...white.ratingHistory,
+        {
+          date: '2026-11',
+          event: eventLabel,
+          fide: preview.whiteNew,
+          glicko: preview.whiteNew,
+          opponent: black.name,
+          result: whiteRes,
+          timeControl,
+        },
+      ],
+    };
+
+    const nextBlackOpenings = mergeMemberOpeningStat(black.openings, detectedOpening, 'black', blackRes);
+    const updatedBlack: ClubMember = {
+      ...black,
+      openings: nextBlackOpenings,
+      signatureOpening: nextBlackOpenings[0]?.name || black.signatureOpening,
+      fide: {
+        ...black.fide,
+        [timeControl]: preview.blackNew,
+        peak: Math.max(black.fide.peak, preview.blackNew),
+        delta30d: black.fide.delta30d + preview.blackDelta,
+        gamesPlayed: black.fide.gamesPlayed + 1,
+      },
+      ratingHistory: [
+        ...black.ratingHistory,
+        {
+          date: '2026-11',
+          event: eventLabel,
+          fide: preview.blackNew,
+          glicko: preview.blackNew,
+          opponent: white.name,
+          result: blackRes,
+          timeControl,
+        },
+      ],
+    };
+
     setMembers((prev) =>
       prev.map((m) => {
-        if (m.id === white.id) {
-          const nextOpenings = mergeMemberOpeningStat(m.openings, detectedOpening, 'white', whiteRes);
-          const topOpening = nextOpenings[0]?.name;
-          return {
-            ...m,
-            openings: nextOpenings,
-            signatureOpening: topOpening || m.signatureOpening,
-            fide: {
-              ...m.fide,
-              [timeControl]: preview.whiteNew,
-              peak: Math.max(m.fide.peak, preview.whiteNew),
-              delta30d: m.fide.delta30d + preview.whiteDelta,
-              gamesPlayed: m.fide.gamesPlayed + 1,
-            },
-            ratingHistory: [
-              ...m.ratingHistory,
-              {
-                date: '2026-11',
-                event: eventLabel,
-                fide: preview.whiteNew,
-                glicko: preview.whiteNew,
-                opponent: black.name,
-                result: whiteRes,
-                timeControl,
-              },
-            ],
-          };
-        }
-        if (m.id === black.id) {
-          const nextOpenings = mergeMemberOpeningStat(m.openings, detectedOpening, 'black', blackRes);
-          const topOpening = nextOpenings[0]?.name;
-          return {
-            ...m,
-            openings: nextOpenings,
-            signatureOpening: topOpening || m.signatureOpening,
-            fide: {
-              ...m.fide,
-              [timeControl]: preview.blackNew,
-              peak: Math.max(m.fide.peak, preview.blackNew),
-              delta30d: m.fide.delta30d + preview.blackDelta,
-              gamesPlayed: m.fide.gamesPlayed + 1,
-            },
-            ratingHistory: [
-              ...m.ratingHistory,
-              {
-                date: '2026-11',
-                event: eventLabel,
-                fide: preview.blackNew,
-                glicko: preview.blackNew,
-                opponent: white.name,
-                result: blackRes,
-                timeControl,
-              },
-            ],
-          };
-        }
+        if (m.id === updatedWhite.id) return updatedWhite;
+        if (m.id === updatedBlack.id) return updatedBlack;
         return m;
       })
     );
+
+    const now = new Date().toISOString();
+    syncDocToFirestore(`clubs/${updatedWhite.clubId}/members`, updatedWhite.id, {
+      ...updatedWhite,
+      updatedAt: now,
+    });
+    syncDocToFirestore(`clubs/${updatedBlack.clubId}/members`, updatedBlack.id, {
+      ...updatedBlack,
+      updatedAt: now,
+    });
 
     return { whiteDelta: preview.whiteDelta, blackDelta: preview.blackDelta };
   };
@@ -575,6 +961,7 @@ export default function App() {
       pgn: payload.pgn,
       status: autoApprove ? 'approved' : 'pending',
       submittedBy: currentUser?.id,
+      submittedByUid: auth.currentUser?.uid,
       whiteEloDelta: preview.whiteDelta,
       blackEloDelta: preview.blackDelta,
       moves: [],
@@ -604,14 +991,18 @@ export default function App() {
       target.openingName
     );
 
+    const updatedGame: LoggedClubGame = { ...target, status: 'approved' };
     setLoggedGames((prev) =>
-      prev.map((g) => (g.id === gameId ? { ...g, status: 'approved' } : g))
+      prev.map((g) => (g.id === gameId ? updatedGame : g))
     );
+    syncDocToFirestore(`clubs/${target.clubId}/games`, gameId, { ...updatedGame });
   };
 
   const handleRejectOrDeleteGame = (gameId: string) => {
     if (!isAdminOrOwner) return;
+    const target = loggedGames.find((g) => g.id === gameId);
     setLoggedGames((prev) => prev.filter((g) => g.id !== gameId));
+    deleteDocFromFirestore(`clubs/${target?.clubId || clubConfig.clubId}/games`, gameId);
   };
 
   /**
@@ -669,6 +1060,7 @@ export default function App() {
       pgn: payload.pgn,
       status: 'approved',
       submittedBy: currentUser?.id,
+      submittedByUid: auth.currentUser?.uid,
       whiteEloDelta: deltas.whiteDelta,
       blackEloDelta: deltas.blackDelta,
       tournamentId: tourney.id,
@@ -676,109 +1068,107 @@ export default function App() {
     };
 
     setLoggedGames((prev) => [newGame, ...prev]);
+    syncDocToFirestore(`clubs/${tourney.clubId}/games`, newGame.id, { ...newGame });
+
+    let updatedTourney: ClubTournament = tourney;
+    if (tourney.format === 'knockout' || tourney.format === 'double_elimination') {
+      const advancedMatches = advanceEliminationBracket(
+        tourney.matches,
+        payload.matchId,
+        payload.result,
+        payload.pgn,
+        newGameId
+      );
+      const maxR = advancedMatches.reduce((acc, m) => Math.max(acc, m.round), 1);
+      const finalMatches = advancedMatches.filter((m) => m.round === maxR);
+      const allFinalDone =
+        finalMatches.length > 0 && finalMatches.every((m) => m.result !== null);
+
+      const unplayedRounds = advancedMatches
+        .filter((m) => m.result === null)
+        .map((m) => m.round);
+      const nextCurrentRound =
+        unplayedRounds.length > 0 ? Math.min(...unplayedRounds) : maxR;
+
+      updatedTourney = {
+        ...tourney,
+        status: allFinalDone ? 'completed' : 'active',
+        currentRound: nextCurrentRound,
+        matches: advancedMatches,
+      };
+    } else {
+      let updatedMatches = tourney.matches.map((m) =>
+        m.id === payload.matchId
+          ? { ...m, result: payload.result, pgn: payload.pgn, gameId: newGameId }
+          : m
+      );
+
+      let nextCurrentRound = tourney.currentRound;
+      let nextStatus = tourney.status;
+
+      if (tourney.format === 'swiss') {
+        const maxR = updatedMatches.reduce((acc, m) => Math.max(acc, m.round), 1);
+        const currentRoundMatches = updatedMatches.filter((m) => m.round === maxR);
+        const allCurrentRoundFinished =
+          currentRoundMatches.length > 0 &&
+          currentRoundMatches.every((m) => m.result !== null);
+
+        if (allCurrentRoundFinished) {
+          if (maxR < tourney.totalRounds) {
+            const players = tourney.playerIds
+              .map((id) => {
+                const mem = members.find((x) => x.id === id);
+                return mem
+                  ? {
+                      id: mem.id,
+                      name: mem.name,
+                      department: mem.department,
+                      rating: mem.fide[tourney.timeControl],
+                    }
+                  : null;
+              })
+              .filter((x): x is NonNullable<typeof x> => x !== null);
+
+            const standings = calculateSwissStandings(players, updatedMatches);
+            const nextPairings = generateNextSwissPairings(
+              standings,
+              updatedMatches,
+              maxR + 1
+            );
+            updatedMatches = [...updatedMatches, ...nextPairings];
+            nextCurrentRound = maxR + 1;
+          } else {
+            nextStatus = 'completed';
+          }
+        }
+      } else {
+        const roundMatches = updatedMatches.filter((m) => m.round === tourney.currentRound);
+        const allRoundFinished =
+          roundMatches.length > 0 && roundMatches.every((m) => m.result !== null);
+        if (allRoundFinished) {
+          const hasNextRound = updatedMatches.some((m) => m.round === tourney.currentRound + 1);
+          if (hasNextRound) {
+            nextCurrentRound = tourney.currentRound + 1;
+          } else if (updatedMatches.every((m) => m.result !== null)) {
+            nextStatus = 'completed';
+          }
+        }
+      }
+
+      updatedTourney = {
+        ...tourney,
+        status: nextStatus,
+        currentRound: nextCurrentRound,
+        matches: updatedMatches,
+      };
+    }
 
     setTournaments((prev) =>
-      prev.map((t) => {
-        if (t.id !== tourney.id) return t;
-
-        // Case A: Elimination Tournament (Knockout / Double Elimination) -> Advance Bracket Slot
-        if (t.format === 'knockout' || t.format === 'double_elimination') {
-          const advancedMatches = advanceEliminationBracket(
-            t.matches,
-            payload.matchId,
-            payload.result,
-            payload.pgn,
-            newGameId
-          );
-          const maxR = advancedMatches.reduce((acc, m) => Math.max(acc, m.round), 1);
-          const finalMatches = advancedMatches.filter((m) => m.round === maxR);
-          const allFinalDone =
-            finalMatches.length > 0 && finalMatches.every((m) => m.result !== null);
-
-          // Determine active round (lowest round with an unplayed match)
-          const unplayedRounds = advancedMatches
-            .filter((m) => m.result === null)
-            .map((m) => m.round);
-          const nextCurrentRound =
-            unplayedRounds.length > 0 ? Math.min(...unplayedRounds) : maxR;
-
-          return {
-            ...t,
-            status: allFinalDone ? 'completed' : 'active',
-            currentRound: nextCurrentRound,
-            matches: advancedMatches,
-          };
-        }
-
-        // Case B: Ranking-Based Tournament (Swiss, Round Robin, Scheveningen, Arena)
-        let updatedMatches = t.matches.map((m) =>
-          m.id === payload.matchId
-            ? { ...m, result: payload.result, pgn: payload.pgn, gameId: newGameId }
-            : m
-        );
-
-        let nextCurrentRound = t.currentRound;
-        let nextStatus = t.status;
-
-        if (t.format === 'swiss') {
-          const maxR = updatedMatches.reduce((acc, m) => Math.max(acc, m.round), 1);
-          const currentRoundMatches = updatedMatches.filter((m) => m.round === maxR);
-          const allCurrentRoundFinished =
-            currentRoundMatches.length > 0 &&
-            currentRoundMatches.every((m) => m.result !== null);
-
-          if (allCurrentRoundFinished) {
-            if (maxR < t.totalRounds) {
-              // Automatically start the next Swiss round!
-              const players = t.playerIds
-                .map((id) => {
-                  const mem = members.find((x) => x.id === id);
-                  return mem
-                    ? {
-                        id: mem.id,
-                        name: mem.name,
-                        department: mem.department,
-                        rating: mem.fide[t.timeControl],
-                      }
-                    : null;
-                })
-                .filter((x): x is NonNullable<typeof x> => x !== null);
-
-              const standings = calculateSwissStandings(players, updatedMatches);
-              const nextPairings = generateNextSwissPairings(
-                standings,
-                updatedMatches,
-                maxR + 1
-              );
-              updatedMatches = [...updatedMatches, ...nextPairings];
-              nextCurrentRound = maxR + 1;
-            } else {
-              nextStatus = 'completed';
-            }
-          }
-        } else {
-          // Pre-generated multi-round ranking formats (Round Robin, Scheveningen, Arena)
-          const roundMatches = updatedMatches.filter((m) => m.round === t.currentRound);
-          const allRoundFinished =
-            roundMatches.length > 0 && roundMatches.every((m) => m.result !== null);
-          if (allRoundFinished) {
-            const hasNextRound = updatedMatches.some((m) => m.round === t.currentRound + 1);
-            if (hasNextRound) {
-              nextCurrentRound = t.currentRound + 1;
-            } else if (updatedMatches.every((m) => m.result !== null)) {
-              nextStatus = 'completed';
-            }
-          }
-        }
-
-        return {
-          ...t,
-          status: nextStatus,
-          currentRound: nextCurrentRound,
-          matches: updatedMatches,
-        };
-      })
+      prev.map((t) => (t.id === tourney.id ? updatedTourney : t))
     );
+    syncDocToFirestore(`clubs/${tourney.clubId}/tournaments`, updatedTourney.id, {
+      ...updatedTourney,
+    });
   };
 
   // --- AUTOMATED TOURNAMENT CREATION (COMPUTER PAIRED — 7 FORMATS) ---
@@ -857,31 +1247,39 @@ export default function App() {
     const maxR = tourney.matches.reduce((acc, m) => Math.max(acc, m.round), 1);
     const nextPairings = generateNextSwissPairings(standings, tourney.matches, maxR + 1);
 
+    const updatedTourney: ClubTournament = {
+      ...tourney,
+      currentRound: maxR + 1,
+      matches: [...tourney.matches, ...nextPairings],
+    };
+
     setTournaments((prev) =>
-      prev.map((t) =>
-        t.id === tournamentId
-          ? {
-              ...t,
-              currentRound: maxR + 1,
-              matches: [...t.matches, ...nextPairings],
-            }
-          : t
-      )
+      prev.map((t) => (t.id === tournamentId ? updatedTourney : t))
     );
+    syncDocToFirestore(`clubs/${tourney.clubId}/tournaments`, tournamentId, {
+      ...updatedTourney,
+    });
   };
 
   const handleDeleteTournament = (tournamentId: string) => {
     if (!isAdminOrOwner) return;
+    const target = tournaments.find((t) => t.id === tournamentId);
+    const cid = target?.clubId || clubConfig.clubId;
+    const removedGames = loggedGames.filter((g) => g.tournamentId === tournamentId);
     setTournaments((prev) => prev.filter((t) => t.id !== tournamentId));
     setLoggedGames((prev) => prev.filter((g) => g.tournamentId !== tournamentId));
+    deleteDocFromFirestore(`clubs/${cid}/tournaments`, tournamentId);
+    removedGames.forEach((g) => deleteDocFromFirestore(`clubs/${cid}/games`, g.id));
   };
 
   const handleClearTournamentHistory = () => {
     if (!isAdminOrOwner) return;
-    const completedIds = new Set(
-      tournaments
-        .filter((t) => t.clubId === clubConfig.clubId && t.status === 'completed')
-        .map((t) => t.id)
+    const completedTourneys = tournaments.filter(
+      (t) => t.clubId === clubConfig.clubId && t.status === 'completed'
+    );
+    const completedIds = new Set(completedTourneys.map((t) => t.id));
+    const removedGames = loggedGames.filter(
+      (g) => g.tournamentId && completedIds.has(g.tournamentId)
     );
     setTournaments((prev) =>
       prev.filter((t) => !(t.clubId === clubConfig.clubId && t.status === 'completed'))
@@ -889,14 +1287,92 @@ export default function App() {
     setLoggedGames((prev) =>
       prev.filter((g) => !g.tournamentId || !completedIds.has(g.tournamentId))
     );
+    completedTourneys.forEach((t) =>
+      deleteDocFromFirestore(`clubs/${clubConfig.clubId}/tournaments`, t.id)
+    );
+    removedGames.forEach((g) =>
+      deleteDocFromFirestore(`clubs/${clubConfig.clubId}/games`, g.id)
+    );
   };
 
   // --- MEMBER ACCOUNT, ROLE, CHESS SPECIALTY & INHERITANCE HANDLERS ---
-  const handleCreateMemberAccount = (payload: {
+  const handleProvisionMemberLogin = async (
+    memberId: string,
+    password: string
+  ): Promise<{ ok: boolean; username: string; errorCode?: string; message: string }> => {
+    if (!isAdminOrOwner) {
+      return { ok: false, username: '', message: 'Admin privileges required.' };
+    }
+    const target = members.find((m) => m.id === memberId);
+    if (!target) {
+      return { ok: false, username: '', message: 'Member not found.' };
+    }
+    if (password.trim().length < 6) {
+      return {
+        ok: false,
+        username: target.username,
+        message: 'Password must be at least 6 characters.',
+      };
+    }
+
+    try {
+      const { uid } = await provisionClubMemberAuthAccount(
+        target.clubId,
+        target.username,
+        password.trim()
+      );
+      const updated: ClubMember = { ...target, authUid: uid };
+      setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
+      await syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+        ...updated,
+        updatedAt: new Date().toISOString(),
+      });
+      if (updated.role === 'admin' && currentUser?.role === 'owner') {
+        await syncDocToFirestore('admins', uid, {
+          uid,
+          role: 'admin',
+          name: updated.name,
+        });
+      }
+      return {
+        ok: true,
+        username: updated.username,
+        message: `Issued Cloud Login for @${updated.username}`,
+      };
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/operation-not-allowed') {
+        return {
+          ok: false,
+          username: target.username,
+          errorCode: code,
+          message:
+            'Enable Email/Password in Firebase Console -> Authentication -> Sign-in method first.',
+        };
+      }
+      if (code === 'auth/email-already-in-use') {
+        return {
+          ok: false,
+          username: target.username,
+          errorCode: code,
+          message: `Login account for @${target.username} is already provisioned in Firebase Auth.`,
+        };
+      }
+      return {
+        ok: false,
+        username: target.username,
+        errorCode: code,
+        message: 'Could not provision Firebase login account.',
+      };
+    }
+  };
+
+  const handleCreateMemberAccount = async (payload: {
     name: string;
     arabicName: string;
     username: string;
-    passwordCode: string;
+    initialPassword?: string;
+    chessComUsername?: string;
     department: string;
     yearLevel: string;
     liveStatus: MemberLiveStatus;
@@ -905,8 +1381,10 @@ export default function App() {
     chessSpecialty?: string;
     signatureOpening?: string;
     bringsEquipment?: boolean;
-  }) => {
-    if (!isAdminOrOwner) return;
+  }): Promise<{ authProvisioned: boolean; authErrorCode?: string; authMessage?: string }> => {
+    if (!isAdminOrOwner) {
+      return { authProvisioned: false, authMessage: 'Admin privileges required.' };
+    }
     const initials = payload.name
       .split(' ')
       .map((n) => n[0])
@@ -916,14 +1394,37 @@ export default function App() {
     const base = clubConfig.startingRating || 1200;
     const newId = `mem-${Date.now()}`;
     const primaryOpening = payload.signatureOpening?.trim() || undefined;
+    let provisionedUid: string | undefined;
+    let authErrorCode: string | undefined;
+    let authMessage: string | undefined;
+
+    if (payload.initialPassword && payload.initialPassword.trim().length >= 6) {
+      try {
+        const res = await provisionClubMemberAuthAccount(
+          clubConfig.clubId,
+          payload.username,
+          payload.initialPassword.trim()
+        );
+        provisionedUid = res.uid;
+      } catch (err: unknown) {
+        authErrorCode = (err as { code?: string })?.code || '';
+        authMessage =
+          authErrorCode === 'auth/operation-not-allowed'
+            ? 'Member profile saved, but Email/Password must be enabled in Firebase Console before students can sign in with passwords.'
+            : 'Member profile saved, though password provisioning returned an Auth error.';
+      }
+    }
+
+    const assignedRole: UserRole = currentUser?.role === 'owner' ? payload.role : 'member';
     const created: ClubMember = {
       id: newId,
       clubId: clubConfig.clubId,
+      authUid: provisionedUid,
       name: payload.name,
       arabicName: payload.arabicName,
       username: payload.username,
-      passwordCode: payload.passwordCode,
-      role: currentUser?.role === 'owner' ? payload.role : 'member',
+      chessComUsername: payload.chessComUsername?.trim() || undefined,
+      role: assignedRole,
       clubRoleDivision: payload.clubRoleDivision || 'Club Member',
       chessSpecialty: payload.chessSpecialty || 'Tactical All-Rounder',
       signatureOpening: primaryOpening,
@@ -934,7 +1435,7 @@ export default function App() {
       titleBadge:
         payload.clubRoleDivision && payload.clubRoleDivision !== 'Club Member'
           ? payload.clubRoleDivision
-          : payload.role === 'admin'
+          : assignedRole === 'admin'
           ? 'Club Admin'
           : `Club Member (${base})`,
       liveStatus: payload.liveStatus,
@@ -976,7 +1477,22 @@ export default function App() {
 
     setMembers((prev) => [created, ...prev]);
     setSelectedMemberId(newId);
-    syncDocToFirestore(`clubs/${clubConfig.clubId}/members`, created.id, { ...created });
+    await syncDocToFirestore(`clubs/${clubConfig.clubId}/members`, created.id, {
+      ...created,
+      updatedAt: new Date().toISOString(),
+    });
+    if (provisionedUid && assignedRole === 'admin' && currentUser?.role === 'owner') {
+      await syncDocToFirestore('admins', provisionedUid, {
+        uid: provisionedUid,
+        role: 'admin',
+        name: created.name,
+      });
+    }
+    return {
+      authProvisioned: Boolean(provisionedUid),
+      authErrorCode,
+      authMessage,
+    };
   };
 
   const handleDeleteMemberAccount = (memberId: string) => {
@@ -991,6 +1507,7 @@ export default function App() {
       }
       return next;
     });
+    deleteDocFromFirestore(`clubs/${target.clubId}/members`, memberId);
   };
 
   const handleUpdateMemberRoleAndChessProfile = (
@@ -1007,38 +1524,52 @@ export default function App() {
   ) => {
     if (!currentUser) return;
     if (!isAdminOrOwner && currentUser.id !== memberId) return;
-    setMembers((prev) =>
-      prev.map((m) => {
-        if (m.id !== memberId) return m;
-        return {
-          ...m,
-          clubRoleDivision: payload.clubRoleDivision ?? m.clubRoleDivision,
-          chessSpecialty: payload.chessSpecialty ?? m.chessSpecialty,
-          signatureOpening: payload.signatureOpening ?? m.signatureOpening,
-          openings: payload.openings && payload.openings.length > 0 ? payload.openings : m.openings,
-          bringsEquipment:
-            payload.bringsEquipment !== undefined
-              ? payload.bringsEquipment
-              : m.bringsEquipment,
-          willingToCoach:
-            payload.willingToCoach !== undefined ? payload.willingToCoach : m.willingToCoach,
-          willingToOrganize:
-            payload.willingToOrganize !== undefined
-              ? payload.willingToOrganize
-              : m.willingToOrganize,
-        };
-      })
-    );
+    const target = members.find((m) => m.id === memberId);
+    if (!target) return;
+    const updated: ClubMember = {
+      ...target,
+      clubRoleDivision: payload.clubRoleDivision ?? target.clubRoleDivision,
+      chessSpecialty: payload.chessSpecialty ?? target.chessSpecialty,
+      signatureOpening: payload.signatureOpening ?? target.signatureOpening,
+      openings: payload.openings && payload.openings.length > 0 ? payload.openings : target.openings,
+      bringsEquipment:
+        payload.bringsEquipment !== undefined
+          ? payload.bringsEquipment
+          : target.bringsEquipment,
+      willingToCoach:
+        payload.willingToCoach !== undefined ? payload.willingToCoach : target.willingToCoach,
+      willingToOrganize:
+        payload.willingToOrganize !== undefined
+          ? payload.willingToOrganize
+          : target.willingToOrganize,
+    };
+    setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
+    if (isAdminOrOwner || target.authUid === auth.currentUser?.uid) {
+      syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+        ...updated,
+        updatedAt: new Date().toISOString(),
+      });
+    }
   };
 
   const handleDesignateSuccessor = (heirId: string) => {
     if (!isAdminOrOwner) return;
+    const now = new Date().toISOString();
+    const changed: ClubMember[] = [];
     setMembers((prev) =>
-      prev.map((m) =>
-        m.clubId === clubConfig.clubId
-          ? { ...m, isDesignatedSuccessor: m.id === heirId }
-          : m
-      )
+      prev.map((m) => {
+        if (m.clubId !== clubConfig.clubId) return m;
+        const nextVal = m.id === heirId;
+        if (Boolean(m.isDesignatedSuccessor) !== nextVal) {
+          const updated = { ...m, isDesignatedSuccessor: nextVal };
+          changed.push(updated);
+          return updated;
+        }
+        return m;
+      })
+    );
+    changed.forEach((m) =>
+      syncDocToFirestore(`clubs/${m.clubId}/members`, m.id, { ...m, updatedAt: now })
     );
   };
 
@@ -1055,27 +1586,41 @@ export default function App() {
       members.find((m) => m.role === 'owner' && m.clubId === clubConfig.clubId) ||
       currentUser;
 
-    setMembers((prev) =>
-      prev.map((m) => {
-        if (m.id === payload.newOwnerId) {
-          return {
-            ...m,
-            role: 'owner',
-            clubRoleDivision: 'President & Founder',
-            titleBadge: `Club President (${payload.mandatePeriod})`,
-            isDesignatedSuccessor: true,
-          };
-        }
-        if (m.role === 'owner' && m.clubId === clubConfig.clubId) {
-          return {
-            ...m,
+    const now = new Date().toISOString();
+    const updatedNewOwner: ClubMember = {
+      ...newOwner,
+      role: 'owner',
+      clubRoleDivision: 'President & Founder',
+      titleBadge: `Club President (${payload.mandatePeriod})`,
+      isDesignatedSuccessor: true,
+    };
+    const updatedPrevOwner: ClubMember | null =
+      prevOwner && prevOwner.id !== newOwner.id
+        ? {
+            ...prevOwner,
             role: 'admin',
             titleBadge: 'Honorary Founding President (Owner Emeritus)',
-          };
-        }
+          }
+        : null;
+
+    setMembers((prev) =>
+      prev.map((m) => {
+        if (m.id === updatedNewOwner.id) return updatedNewOwner;
+        if (updatedPrevOwner && m.id === updatedPrevOwner.id) return updatedPrevOwner;
         return m;
       })
     );
+
+    syncDocToFirestore(`clubs/${updatedNewOwner.clubId}/members`, updatedNewOwner.id, {
+      ...updatedNewOwner,
+      updatedAt: now,
+    });
+    if (updatedPrevOwner) {
+      syncDocToFirestore(`clubs/${updatedPrevOwner.clubId}/members`, updatedPrevOwner.id, {
+        ...updatedPrevOwner,
+        updatedAt: now,
+      });
+    }
 
     const newRecord: ClubGenerationRecord = {
       id: `gen-${Date.now()}`,
@@ -1092,52 +1637,69 @@ export default function App() {
     };
 
     setOwnershipLineage((prev) => [newRecord, ...prev]);
+    syncDocToFirestore(`clubs/${clubConfig.clubId}/lineage`, newRecord.id, { ...newRecord });
     setCurrentUserId(newOwner.id);
   };
 
   const handleReclaimFounderOwnership = () => {
+    const isFounderEmail =
+      firebaseUser?.email?.toLowerCase() === 'fethallah2411@gmail.com' &&
+      firebaseUser?.emailVerified;
+    if (!isAdminOrOwner && !isFounderEmail) return;
+
+    const now = new Date().toISOString();
+    const changed: ClubMember[] = [];
     setMembers((prev) =>
       prev.map((m) => {
         if (m.id === 'enp-owner') {
-          return {
+          const updated: ClubMember = {
             ...m,
             role: 'owner',
             clubRoleDivision: 'President & Founder',
             titleBadge: 'Platform Owner & Founder',
           };
+          changed.push(updated);
+          return updated;
         }
         if (m.role === 'owner' && m.id !== 'enp-owner') {
-          return {
-            ...m,
-            role: 'admin',
-          };
+          const updated: ClubMember = { ...m, role: 'admin' };
+          changed.push(updated);
+          return updated;
         }
         return m;
       })
+    );
+    changed.forEach((m) =>
+      syncDocToFirestore(`clubs/${m.clubId}/members`, m.id, { ...m, updatedAt: now })
     );
     setCurrentUserId('enp-owner');
   };
 
   const handleUpdateMemberRole = (memberId: string, nextRole: UserRole) => {
     if (currentUser?.role !== 'owner') return;
-    setMembers((prev) =>
-      prev.map((m) =>
-        m.id === memberId && m.role !== 'owner'
-          ? {
-              ...m,
-              role: nextRole,
-              titleBadge: nextRole === 'admin' ? 'Club Admin' : 'Club Member',
-            }
-          : m
-      )
-    );
-  };
-
-  const handleUpdateMemberPassword = (memberId: string, nextPassword: string) => {
-    if (!isAdminOrOwner) return;
-    setMembers((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, passwordCode: nextPassword } : m))
-    );
+    const target = members.find((m) => m.id === memberId);
+    if (!target || target.role === 'owner') return;
+    const updated: ClubMember = {
+      ...target,
+      role: nextRole,
+      titleBadge: nextRole === 'admin' ? 'Club Admin' : 'Club Member',
+    };
+    setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
+    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    });
+    if (updated.authUid) {
+      if (nextRole === 'admin') {
+        syncDocToFirestore('admins', updated.authUid, {
+          uid: updated.authUid,
+          role: 'admin',
+          name: updated.name,
+        });
+      } else {
+        deleteDocFromFirestore('admins', updated.authUid);
+      }
+    }
   };
 
   const handleUpdateMemberStatus = (id: string, status: MemberLiveStatus) => {
@@ -1146,30 +1708,47 @@ export default function App() {
       return;
     }
     if (!isAdminOrOwner && currentUser.id !== id) return;
-    setMembers((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, liveStatus: status } : m))
-    );
+    const target = members.find((m) => m.id === id);
+    if (!target) return;
+    const updated: ClubMember = { ...target, liveStatus: status };
+    setMembers((prev) => prev.map((m) => (m.id === id ? updated : m)));
+    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const handleUpdateMemberAvatar = (id: string, avatarUrl: string) => {
     if (!currentUser) return;
     if (!isAdminOrOwner && currentUser.id !== id) return;
-    setMembers((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, avatarUrl } : m))
-    );
+    const target = members.find((m) => m.id === id);
+    if (!target) return;
+    const updated: ClubMember = { ...target, avatarUrl };
+    setMembers((prev) => prev.map((m) => (m.id === id ? updated : m)));
+    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const handleUpdateMemberCoverPhoto = (id: string, coverPhotoUrl: string) => {
     if (!currentUser) return;
     if (!isAdminOrOwner && currentUser.id !== id) return;
-    setMembers((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, coverPhotoUrl } : m))
-    );
+    const target = members.find((m) => m.id === id);
+    if (!target) return;
+    const updated: ClubMember = { ...target, coverPhotoUrl };
+    setMembers((prev) => prev.map((m) => (m.id === id ? updated : m)));
+    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const handleAddMemberPhotoPost = (id: string, imageUrl: string, caption: string) => {
     if (!currentUser) return;
     if (!isAdminOrOwner && currentUser.id !== id) return;
+    const target = members.find((m) => m.id === id);
+    if (!target) return;
     const newPost = {
       id: `photo-${Date.now()}`,
       imageUrl,
@@ -1177,41 +1756,49 @@ export default function App() {
       date: new Date().toISOString().slice(0, 10),
       likes: 1,
     };
-    setMembers((prev) =>
-      prev.map((m) =>
-        m.id === id
-          ? { ...m, profilePhotos: [newPost, ...(m.profilePhotos || [])] }
-          : m
-      )
-    );
+    const updated: ClubMember = {
+      ...target,
+      profilePhotos: [newPost, ...(target.profilePhotos || [])],
+    };
+    setMembers((prev) => prev.map((m) => (m.id === id ? updated : m)));
+    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const handleLikeMemberPhotoPost = (memberId: string, photoId: string) => {
-    setMembers((prev) =>
-      prev.map((m) => {
-        if (m.id !== memberId) return m;
-        return {
-          ...m,
-          profilePhotos: (m.profilePhotos || []).map((p) =>
-            p.id === photoId ? { ...p, likes: p.likes + 1 } : p
-          ),
-        };
-      })
-    );
+    const target = members.find((m) => m.id === memberId);
+    if (!target) return;
+    const updated: ClubMember = {
+      ...target,
+      profilePhotos: (target.profilePhotos || []).map((p) =>
+        p.id === photoId ? { ...p, likes: p.likes + 1 } : p
+      ),
+    };
+    setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
+    if (auth.currentUser && (isAdminOrOwner || target.authUid === auth.currentUser.uid)) {
+      syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+        ...updated,
+        updatedAt: new Date().toISOString(),
+      });
+    }
   };
 
   const handleDeleteMemberPhotoPost = (memberId: string, photoId: string) => {
     if (!currentUser) return;
     if (!isAdminOrOwner && currentUser.id !== memberId) return;
-    setMembers((prev) =>
-      prev.map((m) => {
-        if (m.id !== memberId) return m;
-        return {
-          ...m,
-          profilePhotos: (m.profilePhotos || []).filter((p) => p.id !== photoId),
-        };
-      })
-    );
+    const target = members.find((m) => m.id === memberId);
+    if (!target) return;
+    const updated: ClubMember = {
+      ...target,
+      profilePhotos: (target.profilePhotos || []).filter((p) => p.id !== photoId),
+    };
+    setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
+    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const handleToggleMemberSlot = (memberId: string, slotKey: string) => {
@@ -1220,18 +1807,20 @@ export default function App() {
       return;
     }
     if (!isAdminOrOwner && currentUser.id !== memberId) return;
-    setMembers((prev) =>
-      prev.map((m) => {
-        if (m.id !== memberId) return m;
-        const exists = m.freeSlots.includes(slotKey);
-        return {
-          ...m,
-          freeSlots: exists
-            ? m.freeSlots.filter((s) => s !== slotKey)
-            : [...m.freeSlots, slotKey],
-        };
-      })
-    );
+    const target = members.find((m) => m.id === memberId);
+    if (!target) return;
+    const exists = target.freeSlots.includes(slotKey);
+    const updated: ClubMember = {
+      ...target,
+      freeSlots: exists
+        ? target.freeSlots.filter((s) => s !== slotKey)
+        : [...target.freeSlots, slotKey],
+    };
+    setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
+    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const handleUpdateMemberMeetupZone = (memberId: string, zoneId: string) => {
@@ -1240,9 +1829,14 @@ export default function App() {
       return;
     }
     if (!isAdminOrOwner && currentUser.id !== memberId) return;
-    setMembers((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, campusMeetupZoneId: zoneId } : m))
-    );
+    const target = members.find((m) => m.id === memberId);
+    if (!target) return;
+    const updated: ClubMember = { ...target, campusMeetupZoneId: zoneId };
+    setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
+    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const handleUpdateMemberGps = (
@@ -1254,17 +1848,18 @@ export default function App() {
       return;
     }
     if (!isAdminOrOwner && currentUser.id !== memberId) return;
-    setMembers((prev) =>
-      prev.map((m) =>
-        m.id === memberId
-          ? {
-              ...m,
-              liveStatus: gps ? 'campus_otb' : m.liveStatus,
-              gpsLocation: gps || undefined,
-            }
-          : m
-      )
-    );
+    const target = members.find((m) => m.id === memberId);
+    if (!target) return;
+    const updated: ClubMember = {
+      ...target,
+      liveStatus: gps ? 'campus_otb' : target.liveStatus,
+      gpsLocation: gps || undefined,
+    };
+    setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
+    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   // --- HOME SCREEN POSTS HANDLERS ---
@@ -1292,22 +1887,22 @@ export default function App() {
 
   const handleDeletePost = (postId: string) => {
     if (!isAdminOrOwner) return;
+    const target = posts.find((p) => p.id === postId);
     setPosts((prev) => prev.filter((p) => p.id !== postId));
+    deleteDocFromFirestore(`clubs/${target?.clubId || clubConfig.clubId}/posts`, postId);
   };
 
   // --- MULTI-CLUB ADD (ADMIN/OWNER) & DELETE (OWNER ONLY) ---
-  const handleAddClub = (newClub: ClubThemeConfig) => {
+  const handleAddClub = async (newClub: ClubThemeConfig) => {
     if (!isAdminOrOwner) return;
     setClubs((prev) => [...prev, newClub]);
     setClubConfig(newClub);
-    // Seed an initial club captain in the new club so it has a roster member immediately
     const seedMember: ClubMember = {
       id: `cap-${newClub.clubId}`,
       clubId: newClub.clubId,
       name: `${newClub.clubName} Captain`,
       arabicName: 'قائد النادي',
       username: newClub.clubId.split('-')[0] || 'captain',
-      passwordCode: 'club2026',
       role: 'admin',
       university: newClub.universityName,
       department: 'Engineering & Sciences',
@@ -1347,7 +1942,15 @@ export default function App() {
       freeSlots: ['0-10', '1-11', '2-12'],
     };
     setMembers((prev) => [...prev, seedMember]);
-    syncDocToFirestore('clubs', newClub.clubId, { ...newClub });
+    await syncDocToFirestore('clubs', newClub.clubId, {
+      ...newClub,
+      createdByUid: auth.currentUser?.uid,
+      updatedAt: new Date().toISOString(),
+    });
+    await syncDocToFirestore(`clubs/${newClub.clubId}/members`, seedMember.id, {
+      ...seedMember,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const handleDeleteClub = async (clubIdToDelete: string) => {
@@ -1358,18 +1961,16 @@ export default function App() {
     if (clubConfig.clubId === clubIdToDelete) {
       setClubConfig(remaining[0]);
     }
-    try {
-      if (auth.currentUser) {
-        await deleteDoc(doc(db, 'clubs', clubIdToDelete));
-      }
-    } catch {
-      // ignore
-    }
+    await deleteDocFromFirestore('clubs', clubIdToDelete);
   };
 
   const handleUpdateClubConfig = (next: ClubThemeConfig) => {
     setClubConfig(next);
     setClubs((prev) => prev.map((c) => (c.clubId === next.clubId ? next : c)));
+    syncDocToFirestore('clubs', next.clubId, {
+      ...next,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   // Automatically redirect away from Admin Center if user switches to a non-admin account
@@ -1398,15 +1999,29 @@ export default function App() {
       setIsAuthModalOpen(true);
       return;
     }
+    const senderUid = auth.currentUser?.uid;
+    const recipientMember = payload.recipientId
+      ? members.find((m) => m.id === payload.recipientId)
+      : undefined;
+    const participantUids =
+      payload.channelType === 'dm'
+        ? Array.from(
+            new Set([senderUid, recipientMember?.authUid].filter((x): x is string => Boolean(x)))
+          )
+        : undefined;
+
     const created: ClubChatMessage = {
       id: `msg-${Date.now()}`,
       clubId: currentUser.clubId,
       channelId: payload.channelId,
       channelType: payload.channelType,
       senderId: currentUser.id,
+      senderAuthUid: senderUid,
       senderName: currentUser.name,
       senderRole: currentUser.role,
       recipientId: payload.recipientId,
+      recipientAuthUid: recipientMember?.authUid,
+      participantAuthUids: participantUids,
       text: payload.text,
       challengeTimeControl: payload.challengeTimeControl,
       challengeStakes: payload.challengeStakes,
@@ -1425,6 +2040,7 @@ export default function App() {
     id: ActiveModule;
     label: string;
     shortLabel: string;
+    mobileLabel: string;
     icon: React.ReactNode;
     adminOnly?: boolean;
   }[] = [
@@ -1432,47 +2048,54 @@ export default function App() {
       id: 'overview',
       label: 'Home & Club Posts',
       shortLabel: 'Home',
-      icon: <LayoutDashboard className="w-4 h-4" />,
+      mobileLabel: 'Home',
+      icon: <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4" />,
     },
     {
       id: 'members',
       label: 'Members & Profiles',
       shortLabel: 'Profiles',
-      icon: <Users className="w-4 h-4" />,
+      mobileLabel: 'Players',
+      icon: <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />,
     },
     {
       id: 'studio',
       label: 'Board & Stockfish',
       shortLabel: 'Studio',
-      icon: <Grid className="w-4 h-4" />,
+      mobileLabel: 'Board',
+      icon: <Grid className="w-3.5 h-3.5 sm:w-4 sm:h-4" />,
     },
     {
       id: 'tournaments',
       label: 'Tournaments',
       shortLabel: 'Tournaments',
-      icon: <Trophy className="w-4 h-4" />,
+      mobileLabel: 'Cups',
+      icon: <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4" />,
     },
     {
       id: 'lounge',
       label: currentUser ? 'Teams & Private Chat' : 'Teams Chat (Members Only)',
       shortLabel: 'Teams Chat',
+      mobileLabel: 'Chat',
       icon: currentUser ? (
-        <MessageSquare className="w-4 h-4" />
+        <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
       ) : (
-        <Lock className="w-4 h-4 text-[#FF6B00]" />
+        <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#FF6B00]" />
       ),
     },
     {
       id: 'radar',
       label: 'Free-Hour Radar',
       shortLabel: 'Free Hours',
-      icon: <Calendar className="w-4 h-4" />,
+      mobileLabel: 'Radar',
+      icon: <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4" />,
     },
     {
       id: 'customizer',
       label: `Admin Center${pendingClubGames.length ? ` (${pendingClubGames.length})` : ''}`,
       shortLabel: 'Admin',
-      icon: <Settings className="w-4 h-4" />,
+      mobileLabel: 'Admin',
+      icon: <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />,
       adminOnly: true,
     },
   ];
@@ -1581,7 +2204,7 @@ export default function App() {
         )}
 
         {/* 3-ZONE TOP BAR CONTRACT */}
-        <header className="sticky top-0 z-30 bg-[#061020]/90 theme-header-surface backdrop-blur-xl border-b border-white/10 px-4 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between gap-3 sm:gap-6 w-full max-w-full min-w-0 overflow-hidden">
+        <header className="sticky top-0 z-30 bg-[#061020]/90 theme-header-surface backdrop-blur-xl border-b border-white/10 px-2.5 sm:px-6 py-1.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-6 w-full max-w-full min-w-0 overflow-hidden">
           {/* Zone 1: Brand Logos (Minimalist Text-Free Emblem) & Active Club Name */}
           <a
             href="#overview"
@@ -1589,16 +2212,16 @@ export default function App() {
               e.preventDefault();
               setActiveModule('overview');
             }}
-            className="flex items-center gap-2.5 min-w-0 max-w-full shrink"
+            className="flex items-center gap-2 min-w-0 max-w-full shrink"
           >
-            <div className="flex items-center gap-2 shrink-0 max-w-full">
+            <div className="flex items-center gap-1.5 shrink-0 max-w-full">
               <ClubLogoBadge
                 customLogoUrl={clubConfig.customLogoUrl}
                 accentColor={clubConfig.accentColor}
                 size="sm"
               />
               {clubConfig.schoolLogoUrl && (
-                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#061020] border border-[#26E6DE]/35 shadow-sm flex items-center justify-center shrink-0 overflow-hidden">
+                <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-[#061020] border border-[#26E6DE]/35 shadow-sm flex items-center justify-center shrink-0 overflow-hidden">
                   <img
                     src={clubConfig.schoolLogoUrl}
                     alt={clubConfig.universityName}
@@ -1608,7 +2231,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            <span className="text-base sm:text-lg font-extrabold tracking-tight text-white theme-heading truncate">
+            <span className="text-sm sm:text-lg font-extrabold tracking-tight text-white theme-heading truncate">
               {clubConfig.clubName}
             </span>
           </a>
@@ -1641,19 +2264,20 @@ export default function App() {
             <button
               type="button"
               onClick={() => setIsAuthModalOpen(true)}
-              className="min-h-[40px] px-3.5 py-1.5 text-xs font-bold text-white bg-[#1E56A0] hover:bg-[#2563EB] border border-[#26E6DE]/40 rounded-xl transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 max-w-full cursor-pointer shadow-sm"
+              className="min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1 sm:py-1.5 text-[11px] sm:text-xs font-bold text-white bg-[#1E56A0] hover:bg-[#2563EB] border border-[#26E6DE]/40 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 max-w-full cursor-pointer shadow-sm"
             >
               {currentUser ? (
                 <>
-                  <Shield className="w-3.5 h-3.5 text-[#FF6B00]" />
+                  <Shield className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#FF6B00]" />
                   <span>
                     {currentUser.name.split(' ')[0]} ({currentUser.role.toUpperCase()})
                   </span>
                 </>
               ) : (
                 <>
-                  <LogIn className="w-3.5 h-3.5 text-[#26E6DE]" />
-                  <span>Member / Admin Sign In</span>
+                  <LogIn className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#26E6DE]" />
+                  <span className="hidden sm:inline">Member / Admin Sign In</span>
+                  <span className="sm:hidden">Sign In</span>
                 </>
               )}
             </button>
@@ -1797,15 +2421,15 @@ export default function App() {
 
           {/* MAIN CONTENT VIEWPORT — strictly contained within viewport with max-w-full & min-w-0 */}
           <main
-            className={`flex-1 min-w-0 max-w-full p-3 sm:p-6 lg:p-8 overflow-x-hidden ${
-              androidPreviewMode ? 'pb-8' : 'pb-24 lg:pb-10'
+            className={`flex-1 min-w-0 max-w-full p-2.5 sm:p-6 lg:p-8 overflow-x-hidden ${
+              androidPreviewMode ? 'pb-8' : 'pb-16 lg:pb-10'
             }`}
           >
-            <div className="w-full max-w-[1360px] mx-auto space-y-5 sm:space-y-8 min-w-0">
+            <div className="w-full max-w-[1360px] mx-auto space-y-3.5 sm:space-y-8 min-w-0">
               {/* Quick Theme & Active University Club Bar */}
-              <div className="broadcast-panel rounded-2xl px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 w-full max-w-full min-w-0 overflow-hidden">
-                <div className="flex items-center gap-2 min-w-0 max-w-full">
-                  <span className="text-[11px] font-mono-tabular uppercase text-[#26E6DE] font-bold shrink-0">
+              <div className="broadcast-panel rounded-xl sm:rounded-2xl px-2.5 sm:px-3.5 py-1.5 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 w-full max-w-full min-w-0 overflow-hidden">
+                <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 max-w-full">
+                  <span className="text-[10px] sm:text-[11px] font-mono-tabular uppercase text-[#26E6DE] font-bold shrink-0">
                     Club:
                   </span>
                   <select
@@ -1815,7 +2439,7 @@ export default function App() {
                       const found = clubs.find((c) => c.clubId === e.target.value);
                       if (found) setClubConfig(found);
                     }}
-                    className="min-w-0 max-w-[220px] sm:max-w-[320px] truncate px-2.5 py-1.5 rounded-xl bg-[#061020] border border-white/15 text-xs font-bold text-white cursor-pointer"
+                    className="min-w-0 max-w-[180px] sm:max-w-[320px] truncate px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-[#061020] border border-white/15 text-[11px] sm:text-xs font-bold text-white cursor-pointer"
                   >
                     {clubs.map((c) => (
                       <option key={c.clubId} value={c.clubId}>
@@ -1825,9 +2449,9 @@ export default function App() {
                   </select>
                 </div>
 
-                {/* Instant 1-Click Theme Mode Bar (Dark / Light / Basic / Classic) */}
-                <div className="flex items-center gap-1.5 flex-wrap max-w-full min-w-0">
-                  <span className="text-[11px] font-mono-tabular uppercase text-slate-400 font-bold mr-1 flex items-center gap-1 max-w-full">
+                {/* Instant 1-Click Theme Mode Bar */}
+                <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap max-w-full min-w-0">
+                  <span className="hidden sm:flex text-[11px] font-mono-tabular uppercase text-slate-400 font-bold mr-1 items-center gap-1 max-w-full">
                     <Palette className="w-3.5 h-3.5 text-[#FF6B00]" />
                     Theme:
                   </span>
@@ -1838,20 +2462,21 @@ export default function App() {
                         key={t.id}
                         type="button"
                         onClick={() => setSiteTheme(t.id)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 max-w-full cursor-pointer ${
+                        className={`px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md sm:rounded-lg text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1 max-w-full cursor-pointer ${
                           isActive
                             ? 'bg-[#FF6B00] text-white shadow-sm'
                             : 'bg-[#061020]/75 text-slate-300 border border-white/10 hover:bg-white/10'
                         }`}
                       >
                         {t.id === 'light' ? (
-                          <Sun className="w-3 h-3" />
+                          <Sun className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                         ) : t.id === 'basic' ? (
-                          <Monitor className="w-3 h-3" />
+                          <Monitor className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                         ) : (
-                          <Moon className="w-3 h-3" />
+                          <Moon className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                         )}
-                        <span>{t.label}</span>
+                        <span className="sm:hidden">{t.shortLabel}</span>
+                        <span className="hidden sm:inline">{t.label}</span>
                       </button>
                     );
                   })}
@@ -1872,9 +2497,9 @@ export default function App() {
                 />
               )}
 
-              {/* 4K 16:9 CINEMATIC PAGE HERO BANNER FOR ALL OTHER PAGES (Members, Studio, Tournaments, Free-Hour Radar, Admin) */}
+              {/* 4K 16:9 CINEMATIC PAGE HERO BANNER FOR ALL OTHER PAGES */}
               {activeModule !== 'overview' && !showHeroInWorkspace && (
-                <div className="relative w-full max-w-full min-w-0 h-40 sm:h-52 lg:h-60 rounded-3xl overflow-hidden border border-white/15 shadow-2xl flex flex-col justify-end p-4 sm:p-7">
+                <div className="relative w-full max-w-full min-w-0 h-24 sm:h-52 lg:h-60 rounded-2xl sm:rounded-3xl overflow-hidden border border-white/15 shadow-2xl flex flex-col justify-end p-3 sm:p-7">
                   <img
                     src={activeModuleBg.imageUrl}
                     alt={activeModuleBg.title}
@@ -1888,12 +2513,12 @@ export default function App() {
                         'linear-gradient(90deg, rgba(6,16,32,0.92) 0%, rgba(6,16,32,0.65) 50%, rgba(6,16,32,0.35) 100%), linear-gradient(180deg, rgba(6,16,32,0.2) 0%, #061020 100%)',
                     }}
                   />
-                  <div className="relative z-10 flex flex-wrap items-end justify-between gap-3 max-w-full min-w-0">
-                    <div className="space-y-1 min-w-0 max-w-full">
-                      <h1 className="text-xl sm:text-3xl font-extrabold text-white tracking-tight drop-shadow">
+                  <div className="relative z-10 flex flex-wrap items-end justify-between gap-2 max-w-full min-w-0">
+                    <div className="space-y-0.5 min-w-0 max-w-full">
+                      <h1 className="text-base sm:text-3xl font-extrabold text-white tracking-tight drop-shadow">
                         {activeModuleBg.title}
                       </h1>
-                      <p className="text-xs sm:text-sm text-slate-200 max-w-2xl line-clamp-2">
+                      <p className="text-[10px] sm:text-sm text-slate-200 max-w-2xl line-clamp-1 sm:line-clamp-2">
                         {activeModuleBg.subtitle}
                       </p>
                     </div>
@@ -1917,10 +2542,10 @@ export default function App() {
 
               {/* MODULE 1: HOME / OVERVIEW DASHBOARD */}
               {activeModule === 'overview' && (
-                <div className="space-y-6 sm:space-y-8 min-w-0 w-full max-w-full overflow-hidden">
+                <div className="space-y-4 sm:space-y-8 min-w-0 w-full max-w-full overflow-hidden">
                   {/* Enhanced Real School Campus Photo + School Introduction & Club Goal */}
-                  <div className="broadcast-panel p-4 sm:p-6 rounded-2xl grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch min-w-0 w-full max-w-full overflow-hidden">
-                    <div className="lg:col-span-5 min-w-0 max-w-full relative rounded-2xl overflow-hidden border border-[#26E6DE]/30 bg-[#08224A] shadow-xl min-h-[220px] sm:min-h-[260px] flex items-center justify-center">
+                  <div className="broadcast-panel p-3 sm:p-6 rounded-2xl grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-5 items-stretch min-w-0 w-full max-w-full overflow-hidden">
+                    <div className="lg:col-span-5 min-w-0 max-w-full relative rounded-xl sm:rounded-2xl overflow-hidden border border-[#26E6DE]/30 bg-[#08224A] shadow-xl min-h-[150px] sm:min-h-[260px] flex items-center justify-center">
                       <img
                         src={
                           clubConfig.clubId === 'enp-alger'
@@ -1932,20 +2557,20 @@ export default function App() {
                         className="w-full h-full object-cover object-center"
                       />
                       <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-[#061020]/90 via-transparent to-transparent" />
-                      <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 text-[11px] font-mono-tabular text-white">
-                        <span className="px-2.5 py-1 rounded-lg bg-[#061020]/85 border border-white/15 backdrop-blur-sm truncate">
-                          📍 École Nationale Polytechnique · El Harrach, Algiers (Est. 1925)
+                      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 text-[10px] sm:text-[11px] font-mono-tabular text-white">
+                        <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg bg-[#061020]/85 border border-white/15 backdrop-blur-sm truncate">
+                          📍 ENP El Harrach · Algiers (Est. 1925)
                         </span>
                       </div>
                     </div>
 
-                    <div className="lg:col-span-7 min-w-0 max-w-full flex flex-col justify-between gap-4">
-                      <div className="space-y-3 min-w-0 max-w-full flex-1">
+                    <div className="lg:col-span-7 min-w-0 max-w-full flex flex-col justify-between gap-3">
+                      <div className="space-y-2 sm:space-y-3 min-w-0 max-w-full flex-1">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <h2 className="text-xl sm:text-2xl font-extrabold text-white break-words">
+                          <h2 className="text-base sm:text-2xl font-extrabold text-white break-words">
                             {clubConfig.clubName} · {clubConfig.universityName}
                           </h2>
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="hidden sm:flex items-center gap-2 shrink-0">
                             <ClubLogoBadge
                               customLogoUrl={clubConfig.customLogoUrl}
                               accentColor={clubConfig.accentColor}
@@ -1964,125 +2589,125 @@ export default function App() {
                           </div>
                         </div>
 
-                        <p className="text-xs text-[#26E6DE] font-semibold">
+                        <p className="text-[11px] sm:text-xs text-[#26E6DE] font-semibold">
                           {clubConfig.subtitleAr}
                         </p>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-0.5">
-                          <div className="p-3.5 rounded-xl bg-[#061020]/75 border border-white/10 space-y-1.5">
-                            <div className="text-[11px] font-mono-tabular uppercase text-[#26E6DE] font-bold">
-                              About École Nationale Polytechnique (ENP)
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3 pt-0.5">
+                          <div className="p-2.5 sm:p-3.5 rounded-xl bg-[#061020]/75 border border-white/10 space-y-1">
+                            <div className="text-[10px] sm:text-[11px] font-mono-tabular uppercase text-[#26E6DE] font-bold">
+                              About École Nationale Polytechnique
                             </div>
-                            <p className="text-xs text-slate-300 leading-relaxed">
-                              Founded in 1925 in El Harrach (Algiers), École Nationale Polytechnique is Algeria’s premier engineering institution—training top engineers and researchers across its Preparatory Cycle (CPST) and 13 specialized engineering departments.
+                            <p className="text-[11px] sm:text-xs text-slate-300 leading-snug sm:leading-relaxed">
+                              Founded in 1925 in El Harrach (Algiers), ENP is Algeria’s premier engineering institution across CPST and 13 engineering departments.
                             </p>
                           </div>
 
-                          <div className="p-3.5 rounded-xl bg-[#061020]/75 border border-[#FF6B00]/30 space-y-1.5">
-                            <div className="text-[11px] font-mono-tabular uppercase text-[#FF6B00] font-bold">
+                          <div className="p-2.5 sm:p-3.5 rounded-xl bg-[#061020]/75 border border-[#FF6B00]/30 space-y-1">
+                            <div className="text-[10px] sm:text-[11px] font-mono-tabular uppercase text-[#FF6B00] font-bold">
                               Goal of the ENP Chess Club
                             </div>
-                            <p className="text-xs text-slate-300 leading-relaxed">
-                              Unite polytechnic students from beginners (100–800) to advanced players (1600–2000) through casual over-the-board games on campus, structured coaching workshops, ranked Rapid & Elimination tournaments, and inter-university team representation.
+                            <p className="text-[11px] sm:text-xs text-slate-300 leading-snug sm:leading-relaxed">
+                              Unite polytechnic students from beginners to advanced players via OTB campus games, coaching workshops, and ranked cups.
                             </p>
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2 pt-1 max-w-full min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pt-0.5 max-w-full min-w-0">
                           <button
                             type="button"
                             onClick={() => setActiveModule('lounge')}
-                            className="px-3.5 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] text-white text-xs font-bold flex items-center gap-1.5 max-w-full shadow-lg shadow-[#FF6B00]/20 cursor-pointer"
+                            className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] text-white text-[11px] sm:text-xs font-bold flex items-center gap-1.5 max-w-full shadow-lg shadow-[#FF6B00]/20 cursor-pointer"
                           >
-                            <MessageSquare className="w-3.5 h-3.5 shrink-0" />
-                            <span className="truncate">Open Teams & Private Chat Lounge</span>
+                            <MessageSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                            <span className="truncate">Teams &amp; Chat</span>
                           </button>
                           <button
                             type="button"
                             onClick={() => setActiveModule('studio')}
-                            className="px-3.5 py-2 rounded-xl bg-[#1E56A0] hover:bg-[#2563EB] text-white text-xs font-bold max-w-full cursor-pointer"
+                            className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#1E56A0] hover:bg-[#2563EB] text-white text-[11px] sm:text-xs font-bold max-w-full cursor-pointer"
                           >
-                            Board & Stockfish Studio
+                            Board Studio
                           </button>
                           <button
                             type="button"
                             onClick={() => setActiveModule('tournaments')}
-                            className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 text-xs font-bold max-w-full cursor-pointer"
+                            className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 text-[11px] sm:text-xs font-bold max-w-full cursor-pointer"
                           >
-                            Live Tournaments
+                            Tournaments
                           </button>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* 4-Column KPI Grid (Scoped to Active Club) */}
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 w-full max-w-full min-w-0">
-                    <div className="broadcast-panel p-4 sm:p-5 rounded-2xl min-w-0 max-w-full overflow-hidden">
-                      <div className="text-[11px] sm:text-xs font-mono-tabular text-slate-400">
+                  {/* 4-Column KPI Grid */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4 w-full max-w-full min-w-0">
+                    <div className="broadcast-panel p-2.5 sm:p-5 rounded-xl sm:rounded-2xl min-w-0 max-w-full overflow-hidden">
+                      <div className="text-[9px] sm:text-xs font-mono-tabular text-slate-400">
                         CLUB ROSTER
                       </div>
-                      <div className="text-2xl sm:text-3xl font-extrabold font-mono-tabular text-white mt-1 truncate">
+                      <div className="text-base sm:text-3xl font-extrabold font-mono-tabular text-white mt-0.5 sm:mt-1 truncate">
                         {clubMembers.length} Players
                       </div>
-                      <div className="text-[11px] sm:text-xs text-slate-400 mt-1 truncate">
+                      <div className="text-[10px] sm:text-xs text-slate-400 mt-0.5 sm:mt-1 truncate">
                         {clubConfig.clubName}
                       </div>
                     </div>
 
-                    <div className="broadcast-panel p-4 sm:p-5 rounded-2xl min-w-0 max-w-full overflow-hidden">
-                      <div className="text-[11px] sm:text-xs font-mono-tabular text-slate-400">
+                    <div className="broadcast-panel p-2.5 sm:p-5 rounded-xl sm:rounded-2xl min-w-0 max-w-full overflow-hidden">
+                      <div className="text-[9px] sm:text-xs font-mono-tabular text-slate-400">
                         GAMES DATABASE
                       </div>
-                      <div className="text-2xl sm:text-3xl font-extrabold font-mono-tabular text-[#26E6DE] mt-1 truncate">
+                      <div className="text-base sm:text-3xl font-extrabold font-mono-tabular text-[#26E6DE] mt-0.5 sm:mt-1 truncate">
                         {approvedClubGames.length} Verified
                       </div>
-                      <div className="text-[11px] sm:text-xs text-slate-400 font-mono-tabular mt-1 truncate">
+                      <div className="text-[10px] sm:text-xs text-slate-400 font-mono-tabular mt-0.5 sm:mt-1 truncate">
                         {isAdminOrOwner
-                          ? `${pendingClubGames.length} Pending Approval`
-                          : 'Official PGN Archive'}
+                          ? `${pendingClubGames.length} Pending`
+                          : 'PGN Archive'}
                       </div>
                     </div>
 
-                    <div className="broadcast-panel p-4 sm:p-5 rounded-2xl min-w-0 max-w-full overflow-hidden">
-                      <div className="text-[11px] sm:text-xs font-mono-tabular text-slate-400">
+                    <div className="broadcast-panel p-2.5 sm:p-5 rounded-xl sm:rounded-2xl min-w-0 max-w-full overflow-hidden">
+                      <div className="text-[9px] sm:text-xs font-mono-tabular text-slate-400">
                         #1 CLUB LEADER
                       </div>
-                      <div className="text-base sm:text-xl font-extrabold text-white mt-1 truncate">
+                      <div className="text-sm sm:text-xl font-extrabold text-white mt-0.5 sm:mt-1 truncate">
                         {clubLeader ? clubLeader.name : '—'}
                       </div>
-                      <div className="text-[11px] sm:text-xs font-mono-tabular text-[#FF6B00] font-bold mt-1 truncate">
+                      <div className="text-[10px] sm:text-xs font-mono-tabular text-[#FF6B00] font-bold mt-0.5 sm:mt-1 truncate">
                         {clubLeader
-                          ? `Rapid ${clubLeader.fide.rapid} · Blitz ${clubLeader.fide.blitz}`
+                          ? `R ${clubLeader.fide.rapid} · B ${clubLeader.fide.blitz}`
                           : '1500 Elo'}
                       </div>
                     </div>
 
-                    <div className="broadcast-panel p-4 sm:p-5 rounded-2xl min-w-0 max-w-full overflow-hidden">
-                      <div className="text-[11px] sm:text-xs font-mono-tabular text-slate-400">
+                    <div className="broadcast-panel p-2.5 sm:p-5 rounded-xl sm:rounded-2xl min-w-0 max-w-full overflow-hidden">
+                      <div className="text-[9px] sm:text-xs font-mono-tabular text-slate-400">
                         ONLINE / OTB NOW
                       </div>
-                      <div className="text-2xl sm:text-3xl font-extrabold font-mono-tabular text-[#FF6B00] mt-1 truncate">
+                      <div className="text-base sm:text-3xl font-extrabold font-mono-tabular text-[#FF6B00] mt-0.5 sm:mt-1 truncate">
                         {freeNowPlayers.length} Ready
                       </div>
-                      <div className="text-[11px] sm:text-xs text-slate-400 mt-1 truncate">
+                      <div className="text-[10px] sm:text-xs text-slate-400 mt-0.5 sm:mt-1 truncate">
                         In {clubConfig.clubName}
                       </div>
                     </div>
                   </div>
 
-                  {/* CLUB NEWS & ADMIN ANNOUNCEMENTS FEED ON HOME SCREEN */}
-                  <div className="broadcast-panel p-4 sm:p-6 rounded-2xl space-y-4 w-full max-w-full min-w-0 overflow-hidden">
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3 max-w-full min-w-0">
+                  {/* CLUB NEWS & ADMIN ANNOUNCEMENTS FEED */}
+                  <div className="broadcast-panel p-3 sm:p-6 rounded-2xl space-y-3 sm:space-y-4 w-full max-w-full min-w-0 overflow-hidden">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2.5 sm:pb-3 max-w-full min-w-0">
                       <div className="min-w-0 max-w-full">
-                        <span className="text-xs font-mono-tabular uppercase text-[#FF6B00] font-bold flex items-center gap-1.5 max-w-full">
-                          <Megaphone className="w-3.5 h-3.5 shrink-0" />
+                        <span className="text-[10px] sm:text-xs font-mono-tabular uppercase text-[#FF6B00] font-bold flex items-center gap-1.5 max-w-full">
+                          <Megaphone className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
                           <span className="truncate">
-                            OFFICIAL {clubConfig.clubName.toUpperCase()} BULLETIN BOARD
+                            {clubConfig.clubName.toUpperCase()} BULLETIN BOARD
                           </span>
                         </span>
-                        <h3 className="text-lg font-bold text-white mt-0.5">
-                          Club News, Tournament Calls & Admin Posts
+                        <h3 className="text-sm sm:text-lg font-bold text-white mt-0.5">
+                          Club News &amp; Admin Posts
                         </h3>
                       </div>
 
@@ -2090,52 +2715,50 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => setIsQuickPostModalOpen(true)}
-                          className="px-3.5 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] text-white text-xs font-bold flex items-center gap-1.5 max-w-full cursor-pointer shadow-lg shadow-[#FF6B00]/20"
+                          className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] text-white text-[11px] sm:text-xs font-bold flex items-center gap-1 max-w-full cursor-pointer shadow-lg shadow-[#FF6B00]/20"
                         >
-                          <PlusCircle className="w-3.5 h-3.5 shrink-0" />
-                          + Publish Home Post
+                          <PlusCircle className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                          + Post
                         </button>
                       )}
                     </div>
 
                     {clubPosts.length === 0 ? (
-                      <div className="p-6 rounded-xl bg-[#061020]/70 text-center text-xs text-slate-400">
+                      <div className="p-4 sm:p-6 rounded-xl bg-[#061020]/70 text-center text-[11px] sm:text-xs text-slate-400">
                         No announcements posted for {clubConfig.clubName} yet.
                       </div>
                     ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-full min-w-0">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-4 w-full max-w-full min-w-0">
                         {clubPosts.map((post) => (
                           <article
                             key={post.id}
-                            className="p-4 rounded-xl bg-[#061020]/80 border border-white/10 space-y-2 flex flex-col justify-between max-w-full min-w-0 overflow-hidden"
+                            className="p-3 sm:p-4 rounded-xl bg-[#061020]/80 border border-white/10 space-y-1.5 sm:space-y-2 flex flex-col justify-between max-w-full min-w-0 overflow-hidden"
                           >
-                            <div className="space-y-1.5 min-w-0 max-w-full">
-                              <div className="flex flex-wrap items-center gap-2 max-w-full min-w-0">
-                                <span className="px-2 py-0.5 rounded bg-[#1E56A0]/40 text-[#26E6DE] font-mono-tabular text-[10px] font-bold uppercase">
+                            <div className="space-y-1 min-w-0 max-w-full">
+                              <div className="flex flex-wrap items-center gap-1.5 max-w-full min-w-0">
+                                <span className="px-1.5 py-0.5 rounded bg-[#1E56A0]/40 text-[#26E6DE] font-mono-tabular text-[9px] sm:text-[10px] font-bold uppercase">
                                   {post.category}
                                 </span>
                                 {post.pinned && (
-                                  <span className="px-2 py-0.5 rounded bg-[#FF6B00]/20 text-[#FF6B00] font-mono-tabular text-[10px] font-bold uppercase">
+                                  <span className="px-1.5 py-0.5 rounded bg-[#FF6B00]/20 text-[#FF6B00] font-mono-tabular text-[9px] sm:text-[10px] font-bold uppercase">
                                     Pinned
                                   </span>
                                 )}
-                                <span className="text-[11px] font-mono-tabular text-slate-400">
+                                <span className="text-[10px] sm:text-[11px] font-mono-tabular text-slate-400">
                                   {post.createdAt}
                                 </span>
                               </div>
-                              <h4 className="text-sm sm:text-base font-bold text-white break-words">
+                              <h4 className="text-xs sm:text-base font-bold text-white break-words">
                                 {post.title}
                               </h4>
-                              <p className="text-xs text-slate-300 leading-relaxed break-words">
+                              <p className="text-[11px] sm:text-xs text-slate-300 leading-snug sm:leading-relaxed break-words">
                                 {post.body}
                               </p>
                             </div>
 
-                            <div className="pt-2 border-t border-white/8 flex items-center justify-between text-[11px] text-slate-400 max-w-full min-w-0">
+                            <div className="pt-1.5 border-t border-white/8 flex items-center justify-between text-[10px] sm:text-[11px] text-slate-400 max-w-full min-w-0">
                               <span className="truncate">
-                                Posted by{' '}
-                                <strong className="text-slate-200">{post.authorName}</strong> (
-                                {post.authorRole})
+                                By <strong className="text-slate-200">{post.authorName}</strong>
                               </span>
                             </div>
                           </article>
@@ -2145,27 +2768,27 @@ export default function App() {
                   </div>
 
                   {/* Rating Distribution & Club-Scoped Available Players */}
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full max-w-full min-w-0">
-                    <div className="lg:col-span-6 broadcast-panel p-4 sm:p-6 rounded-2xl space-y-4 min-w-0 max-w-full overflow-hidden">
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 w-full max-w-full min-w-0">
+                    <div className="lg:col-span-6 broadcast-panel p-3 sm:p-6 rounded-2xl space-y-3 sm:space-y-4 min-w-0 max-w-full overflow-hidden">
                       <div className="flex items-center justify-between gap-2 max-w-full min-w-0">
                         <div className="min-w-0">
-                          <span className="text-xs font-mono-tabular uppercase text-slate-400 block truncate">
-                            UNIFIED ELO DISTRIBUTION ({clubConfig.clubName.toUpperCase()})
+                          <span className="text-[10px] sm:text-xs font-mono-tabular uppercase text-slate-400 block truncate">
+                            UNIFIED ELO DISTRIBUTION
                           </span>
-                          <h3 className="text-base sm:text-lg font-bold text-white">
+                          <h3 className="text-sm sm:text-lg font-bold text-white">
                             Club Rapid Elo Distribution
                           </h3>
                         </div>
                         <button
                           type="button"
                           onClick={() => setActiveModule('members')}
-                          className="min-h-[38px] px-2.5 text-xs font-bold text-[#26E6DE] hover:underline flex items-center gap-1 max-w-full shrink-0 cursor-pointer"
+                          className="min-h-[30px] sm:min-h-[38px] px-2 text-[11px] sm:text-xs font-bold text-[#26E6DE] hover:underline flex items-center gap-0.5 max-w-full shrink-0 cursor-pointer"
                         >
-                          Full Roster <ChevronRight className="w-3.5 h-3.5" />
+                          Roster <ChevronRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
-                      <div className="space-y-3 pt-2 max-w-full min-w-0">
+                      <div className="space-y-2.5 pt-1 max-w-full min-w-0">
                         {ratingBuckets.map((b) => {
                           const pctVal =
                             clubMembers.length > 0
@@ -2173,13 +2796,13 @@ export default function App() {
                               : 0;
                           return (
                             <div key={b.range} className="space-y-1 max-w-full min-w-0">
-                              <div className="flex items-center justify-between text-xs max-w-full min-w-0">
-                                <span className="font-semibold text-slate-200">{b.range}</span>
-                                <span className="font-mono-tabular text-slate-400">
-                                  {b.count} members ({pctVal}%)
+                              <div className="flex items-center justify-between text-[11px] sm:text-xs max-w-full min-w-0">
+                                <span className="font-semibold text-slate-200 truncate">{b.range}</span>
+                                <span className="font-mono-tabular text-slate-400 shrink-0">
+                                  {b.count} ({pctVal}%)
                                 </span>
                               </div>
-                              <div className="w-full h-2.5 bg-white/10 rounded-full overflow-hidden">
+                              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
                                 <div
                                   className="h-full rounded-full bg-gradient-to-r from-[#1E56A0] to-[#26E6DE]"
                                   style={{ width: `${Math.max(8, pctVal)}%` }}
@@ -2191,43 +2814,43 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="lg:col-span-6 broadcast-panel p-4 sm:p-6 rounded-2xl space-y-4 min-w-0 max-w-full overflow-hidden">
+                    <div className="lg:col-span-6 broadcast-panel p-3 sm:p-6 rounded-2xl space-y-3 sm:space-y-4 min-w-0 max-w-full overflow-hidden">
                       <div className="flex items-center justify-between gap-2 max-w-full min-w-0">
                         <div className="min-w-0">
-                          <span className="text-xs font-mono-tabular uppercase text-[#FF6B00] font-bold block truncate">
+                          <span className="text-[10px] sm:text-xs font-mono-tabular uppercase text-[#FF6B00] font-bold block truncate">
                             SCOPED TO {clubConfig.clubName.toUpperCase()}
                           </span>
-                          <h3 className="text-base sm:text-lg font-bold text-white">
-                            Club Members Online & OTB Right Now
+                          <h3 className="text-sm sm:text-lg font-bold text-white">
+                            Members Online &amp; OTB Now
                           </h3>
                         </div>
                         <button
                           type="button"
                           onClick={() => setActiveModule('radar')}
-                          className="min-h-[38px] px-2.5 text-xs font-bold text-[#26E6DE] hover:underline flex items-center gap-1 max-w-full shrink-0 cursor-pointer"
+                          className="min-h-[30px] sm:min-h-[38px] px-2 text-[11px] sm:text-xs font-bold text-[#26E6DE] hover:underline flex items-center gap-0.5 max-w-full shrink-0 cursor-pointer"
                         >
-                          Free-Hour Radar <ChevronRight className="w-3.5 h-3.5" />
+                          GPS Radar <ChevronRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
-                      <div className="space-y-2.5 max-w-full min-w-0">
+                      <div className="space-y-2 max-w-full min-w-0">
                         {freeNowPlayers.slice(0, 4).map((p) => (
                           <div
                             key={p.id}
-                            className="p-3 rounded-xl bg-[#061020]/70 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 max-w-full min-w-0 overflow-hidden"
+                            className="p-2.5 sm:p-3 rounded-xl bg-[#061020]/70 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 max-w-full min-w-0 overflow-hidden"
                           >
                             <div className="min-w-0 max-w-full">
-                              <div className="font-bold text-sm text-white truncate">
+                              <div className="font-bold text-xs sm:text-sm text-white truncate">
                                 {p.name} ·{' '}
                                 <span className="font-mono-tabular text-[#FF6B00]">
-                                  Rapid {p.fide.rapid}
+                                  R {p.fide.rapid}
                                 </span>{' '}
                                 ·{' '}
                                 <span className="font-mono-tabular text-[#26E6DE]">
-                                  Blitz {p.fide.blitz}
+                                  B {p.fide.blitz}
                                 </span>
                               </div>
-                              <div className="text-xs text-slate-400 truncate">
+                              <div className="text-[10px] sm:text-xs text-slate-400 truncate">
                                 {p.department} ·{' '}
                                 {p.liveStatus === 'campus_otb'
                                   ? 'On Campus OTB'
@@ -2235,28 +2858,28 @@ export default function App() {
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2 max-w-full shrink-0">
+                            <div className="flex items-center gap-1.5 max-w-full shrink-0">
                               <button
                                 type="button"
                                 onClick={() => {
                                   setSelectedMemberId(p.id);
                                   setActiveModule('members');
                                 }}
-                                className="min-h-[38px] flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/8 border border-white/15 text-slate-200 hover:bg-white/15 cursor-pointer"
+                                className="min-h-[28px] sm:min-h-[38px] flex-1 sm:flex-initial px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-white/8 border border-white/15 text-slate-200 hover:bg-white/15 cursor-pointer"
                               >
                                 Profile
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleOpenPrivateChatWithMember(p.id)}
-                                className="min-h-[38px] flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-bold bg-[#1E56A0] hover:bg-[#2563EB] text-white cursor-pointer"
+                                className="min-h-[28px] sm:min-h-[38px] flex-1 sm:flex-initial px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-bold bg-[#1E56A0] hover:bg-[#2563EB] text-white cursor-pointer"
                               >
-                                DM / Play
+                                DM
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setActiveModule('studio')}
-                                className="min-h-[38px] flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[#FF6B00] hover:bg-[#FF8533] text-white cursor-pointer"
+                                className="min-h-[28px] sm:min-h-[38px] flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-1 rounded-lg text-[10px] sm:text-xs font-bold bg-[#FF6B00] hover:bg-[#FF8533] text-white cursor-pointer"
                               >
                                 Studio
                               </button>
@@ -2384,8 +3007,10 @@ export default function App() {
                   currentUser={currentUser}
                   onOpenAuthModal={() => setIsAuthModalOpen(true)}
                   onCreateMemberAccount={handleCreateMemberAccount}
+                  onProvisionMemberLogin={handleProvisionMemberLogin}
                   onUpdateMemberRole={handleUpdateMemberRole}
-                  onUpdateMemberPassword={handleUpdateMemberPassword}
+                  onSyncClubToFirestore={seedClubToFirestore}
+                  isCloudSynced={isCloudSynced}
                   onUpdateMemberRoleAndChessProfile={handleUpdateMemberRoleAndChessProfile}
                   onDeleteMemberAccount={handleDeleteMemberAccount}
                   ownershipLineage={ownershipLineage}
@@ -2417,7 +3042,7 @@ export default function App() {
             androidPreviewMode
               ? 'sticky bottom-0 flex'
               : 'fixed bottom-0 inset-x-0 flex lg:hidden'
-          } bg-[#061020]/95 backdrop-blur-xl border-t border-white/15 px-1.5 py-1.5 justify-around items-center z-40 shadow-[0_-10px_30px_rgba(0,0,0,0.6)]`}
+          } bg-[#061020]/95 backdrop-blur-xl border-t border-white/15 px-1 py-1 justify-around items-center z-40 shadow-[0_-10px_30px_rgba(0,0,0,0.6)]`}
         >
           {navItems.map((item) => {
             const active = activeModule === item.id;
@@ -2426,14 +3051,14 @@ export default function App() {
                 key={item.id}
                 type="button"
                 onClick={() => setActiveModule(item.id)}
-                className={`min-h-[46px] flex-1 flex flex-col items-center justify-center gap-1 px-1 py-1 rounded-xl text-[10px] sm:text-[11px] font-semibold transition-colors cursor-pointer ${
+                className={`min-h-[36px] flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 px-0.5 py-0.5 rounded-lg text-[9px] font-semibold transition-colors cursor-pointer ${
                   active
                     ? 'text-[#26E6DE] bg-white/8 font-bold'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
                 {item.icon}
-                <span className="whitespace-nowrap">{item.shortLabel}</span>
+                <span className="whitespace-nowrap truncate max-w-full">{item.mobileLabel}</span>
               </button>
             );
           })}
@@ -2489,115 +3114,99 @@ export default function App() {
               </div>
             )}
 
-            {/* Option 1: Login with Admin-Issued Username & Password */}
-            <form onSubmit={handleCredentialLogin} className="space-y-3">
-              <div className="text-xs font-mono-tabular uppercase text-[#FF6B00] font-bold flex items-center gap-1.5">
-                <Key className="w-3.5 h-3.5" />
-                Sign In with Admin-Issued Club Credentials
-              </div>
-
+            <div className="space-y-4">
               {loginError && (
-                <div className="p-2.5 rounded-xl bg-rose-500/20 border border-rose-400/40 text-xs text-rose-200">
+                <div className="p-3 rounded-xl bg-rose-500/20 border border-rose-400/40 text-xs text-rose-200 leading-relaxed">
                   {loginError}
                 </div>
               )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Club Username
-                </label>
-                <input
-                  type="text"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  placeholder="e.g., fethallah, yasser, or wadjih"
-                  className="w-full px-3 py-2 text-xs font-mono-tabular rounded-xl border border-white/15 bg-[#061020] text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Password Code (Sent by Admin)
-                </label>
-                <input
-                  type="password"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="e.g., enp2026"
-                  className="w-full px-3 py-2 text-xs font-mono-tabular rounded-xl border border-white/15 bg-[#061020] text-white"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] text-white text-xs font-bold cursor-pointer shadow-lg shadow-[#FF6B00]/25"
+              {/* 1. Admin-Issued Club Account Login (Username + Password) */}
+              <form
+                onSubmit={handleClubAccountLogin}
+                className="p-3.5 rounded-xl bg-[#061020]/80 border border-[#26E6DE]/30 space-y-3"
               >
-                Sign In with Club Account
-              </button>
-            </form>
+                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-[#FF6B00]" />
+                  Sign In with Admin-Issued Club Account
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Enter the club username (e.g. <span className="font-mono-tabular text-[#26E6DE]">@yasser</span>) and password issued to you by the Club Admin.
+                </p>
 
-            {/* Option 2: Google Sign-In */}
-            <div className="pt-3 border-t border-white/10">
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Club Username
+                    </label>
+                    <input
+                      type="text"
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      placeholder="e.g., yasser or wadjih"
+                      autoComplete="username"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-white/15 bg-[#040B16] text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      placeholder="Enter club password"
+                      autoComplete="current-password"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-white/15 bg-[#040B16] text-white"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoggingIn}
+                  className="w-full py-2.5 px-4 rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] disabled:opacity-50 text-white text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#FF6B00]/20"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>{isLoggingIn ? 'Signing In...' : 'Sign In with Club Account'}</span>
+                </button>
+              </form>
+
+              <div className="flex items-center gap-2 text-[10px] font-mono-tabular uppercase text-slate-500">
+                <div className="flex-1 h-px bg-white/10" />
+                <span>OR VERIFIED GOOGLE AUTH</span>
+                <div className="flex-1 h-px bg-white/10" />
+              </div>
+
+              <div className="p-3 rounded-xl bg-[#061020]/60 border border-white/10 text-[11px] text-slate-300 space-y-1 leading-relaxed">
+                <div className="font-bold text-white flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-[#26E6DE]" />
+                  Owner &amp; Verified Google Sign-In
+                </div>
+                <p className="text-slate-400">
+                  Club Owner (<span className="font-mono-tabular text-[#26E6DE]">fethallah2411@gmail.com</span>) or students using Google sign in here.
+                </p>
+              </div>
+
               <button
                 type="button"
                 onClick={handleGoogleLogin}
-                className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-[#061020] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-[#061020] text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-lg"
               >
+                <LogIn className="w-4 h-4" />
                 <span>Continue with Google Account</span>
               </button>
-            </div>
 
-            {/* Option 3: Instant Role / Account Switcher */}
-            <div className="pt-3 border-t border-white/10 space-y-2">
-              <div className="text-[11px] font-mono-tabular uppercase text-slate-400">
-                Quick Account Switcher (Owner / Member / Guest)
-              </div>
-              <div className="space-y-1.5">
-                {[
-                  {
-                    id: 'enp-owner',
-                    label: 'Fethallah (Platform Owner & Founder · ENP — All Permissions)',
-                  },
-                  {
-                    id: 'enp-yasser-boureghda',
-                    label: 'Boureghda Yasser (ENP Chimie · 1600 ELO · Member)',
-                  },
-                  {
-                    id: 'enp-ahmed-wadjih',
-                    label: 'Hammada Ahmed Wadjih (ENP 1CP · 1600 ELO · Member)',
-                  },
-                ].map((demo) => (
-                  <button
-                    key={demo.id}
-                    type="button"
-                    onClick={() => {
-                      setCurrentUserId(demo.id);
-                      const foundMem = members.find((m) => m.id === demo.id);
-                      const foundClub = clubs.find((c) => c.clubId === foundMem?.clubId);
-                      if (foundClub) setClubConfig(foundClub);
-                      setIsAuthModalOpen(false);
-                    }}
-                    className={`w-full p-2.5 rounded-xl border text-left text-xs font-semibold transition-colors cursor-pointer ${
-                      currentUserId === demo.id
-                        ? 'bg-[#1E56A0]/40 border-[#26E6DE] text-white'
-                        : 'bg-[#061020]/70 border-white/10 text-slate-300 hover:bg-white/10'
-                    }`}
-                  >
-                    {demo.label}
-                  </button>
-                ))}
+              {!currentUser && (
                 <button
                   type="button"
-                  onClick={handleSignOut}
-                  className={`w-full p-2.5 rounded-xl border text-left text-xs font-semibold transition-colors cursor-pointer ${
-                    currentUserId === null
-                      ? 'bg-[#1E56A0]/40 border-[#26E6DE] text-white'
-                      : 'bg-[#061020]/70 border-white/10 text-slate-400 hover:bg-white/10'
-                  }`}
+                  onClick={() => setIsAuthModalOpen(false)}
+                  className="w-full p-2 rounded-xl border border-white/10 bg-[#061020]/50 hover:bg-white/10 text-center text-xs font-semibold text-slate-300 transition-colors cursor-pointer"
                 >
-                  Browse as Unauthenticated Guest (Read-Only)
+                  Continue Browsing as Guest (Read-Only)
                 </button>
-              </div>
+              )}
             </div>
           </div>
         </div>

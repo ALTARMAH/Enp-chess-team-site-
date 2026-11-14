@@ -10,15 +10,13 @@ import {
   ClubTournament,
   LoggedClubGame,
   MemberLiveStatus,
-  OPENING_REPERTOIRE_PRESETS,
   UserRole,
 } from '../utils/clubData';
+import { compressImageFile } from '../utils/imageUtils';
 import { ClubLogoBadge } from './ClubLogoBadge';
 import {
   Smartphone,
   Upload,
-  Copy,
-  Check,
   Shield,
   UserPlus,
   CheckCircle2,
@@ -52,18 +50,23 @@ interface ClubCustomizerSpecProps {
     name: string;
     arabicName: string;
     username: string;
-    passwordCode: string;
+    initialPassword?: string;
+    chessComUsername?: string;
     department: string;
     yearLevel: string;
     liveStatus: MemberLiveStatus;
     role: UserRole;
     clubRoleDivision?: ClubRoleDivision;
     chessSpecialty?: string;
-    signatureOpening?: string;
     bringsEquipment?: boolean;
-  }) => void;
+  }) => Promise<{ authProvisioned: boolean; authErrorCode?: string; authMessage?: string }> | void;
+  onProvisionMemberLogin?: (
+    memberId: string,
+    password: string
+  ) => Promise<{ ok: boolean; username: string; errorCode?: string; message: string }>;
   onUpdateMemberRole: (memberId: string, nextRole: UserRole) => void;
-  onUpdateMemberPassword: (memberId: string, nextPassword: string) => void;
+  onSyncClubToFirestore?: () => Promise<void>;
+  isCloudSynced?: boolean;
   onUpdateMemberRoleAndChessProfile?: (
     memberId: string,
     payload: {
@@ -123,8 +126,10 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
   currentUser,
   onOpenAuthModal,
   onCreateMemberAccount,
+  onProvisionMemberLogin,
   onUpdateMemberRole,
-  onUpdateMemberPassword,
+  onSyncClubToFirestore,
+  isCloudSynced = false,
   onUpdateMemberRoleAndChessProfile,
   onDeleteMemberAccount,
   ownershipLineage = [],
@@ -145,7 +150,7 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
   onToggleAndroidPreview,
 }) => {
   const [subTab, setSubTab] = useState<AdminSubTab>('accounts');
-  const [copiedCredId, setCopiedCredId] = useState<string>('');
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
   const [adminToast, setAdminToast] = useState<string>('');
   const [roleSearch, setRoleSearch] = useState<string>('');
   const [divisionFilter, setDivisionFilter] = useState<'ALL' | ClubRoleDivision>('ALL');
@@ -154,16 +159,22 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
   const [accName, setAccName] = useState('');
   const [accArabic, setAccArabic] = useState('');
   const [accUsername, setAccUsername] = useState('');
-  const [accPassword, setAccPassword] = useState('enp-2026');
+  const [accPassword, setAccPassword] = useState('');
+  const [accChessCom, setAccChessCom] = useState('');
   const [accDept, setAccDept] = useState('Génie Électrique & Automatique');
   const [accYear, setAccYear] = useState('1st Year Ingénieur');
   const [accRole, setAccRole] = useState<UserRole>('member');
   const [accDivision, setAccDivision] = useState<ClubRoleDivision>('Club Member');
   const [accSpecialty, setAccSpecialty] = useState<string>(CHESS_SPECIALTY_PRESETS[0]);
-  const [accOpening, setAccOpening] = useState<string>(
-    OPENING_REPERTOIRE_PRESETS[0]
-  );
   const [accBringsEquipment, setAccBringsEquipment] = useState<boolean>(false);
+  const [issuedCredsBanner, setIssuedCredsBanner] = useState<{
+    name: string;
+    username: string;
+    password: string;
+    note?: string;
+  } | null>(null);
+  const [issuingMemberId, setIssuingMemberId] = useState<string | null>(null);
+  const [rowPasswords, setRowPasswords] = useState<Record<string, string>>({});
 
   // Next-Generation Inheritance State
   const currentDesignatedHeir = members.find((m) => m.isDesignatedSuccessor);
@@ -206,47 +217,81 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
     CLUB_ROLE_DIVISIONS.find((d) => d.id === div) ||
     CLUB_ROLE_DIVISIONS[CLUB_ROLE_DIVISIONS.length - 1];
 
-  const handleCopyCredentials = (m: ClubMember) => {
-    const text = `${clubConfig.clubName} Login Credentials\nMember: ${m.name}\nClub Role: ${
-      m.clubRoleDivision || 'Club Member'
-    }\nUsername: ${m.username}\nPassword Code: ${m.passwordCode}`;
-    navigator.clipboard?.writeText(text);
-    setCopiedCredId(m.id);
-    setTimeout(() => setCopiedCredId(''), 2500);
+  const handleExportClubBackup = () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      club: clubConfig,
+      members,
+      tournaments,
+      games: [...approvedGames, ...pendingGames],
+      posts,
+      ownershipLineage,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${clubConfig.clubId}-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setAdminToast('Exported sanitized club backup JSON (zero emails or passwords).');
   };
 
-  const handleCreateAccountSubmit = (e: React.FormEvent) => {
+  const generateRandomPasscode = () => {
+    const num = Math.floor(100000 + Math.random() * 900000);
+    return `enp-${num}`;
+  };
+
+  const handleCreateAccountSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdminOrOwner) {
       onOpenAuthModal();
       return;
     }
-    if (!accName.trim() || !accUsername.trim() || !accPassword.trim()) return;
+    if (!accName.trim() || !accUsername.trim()) return;
 
-    onCreateMemberAccount({
+    const cleanUsername = accUsername.trim().toLowerCase().replace(/\s+/g, '');
+    const pwd = accPassword.trim();
+    const res = await onCreateMemberAccount({
       name: accName.trim(),
       arabicName: accArabic.trim() || 'عضو نادي الشطرنج',
-      username: accUsername.trim().toLowerCase().replace(/\s+/g, ''),
-      passwordCode: accPassword.trim(),
+      username: cleanUsername,
+      initialPassword: pwd.length >= 6 ? pwd : undefined,
+      chessComUsername: accChessCom.trim() || undefined,
       department: accDept.trim() || 'Polytechnic Engineering',
       yearLevel: accYear.trim() || 'Ingénieur',
       liveStatus: 'campus_otb',
       role: isOwner ? accRole : 'member',
       clubRoleDivision: accDivision,
       chessSpecialty: accSpecialty,
-      signatureOpening: accOpening,
       bringsEquipment: accBringsEquipment,
     });
 
+    if (pwd.length >= 6 && res && 'authProvisioned' in res) {
+      if (res.authProvisioned) {
+        setIssuedCredsBanner({
+          name: accName.trim(),
+          username: cleanUsername,
+          password: pwd,
+        });
+      } else if (res.authMessage) {
+        setIssuedCredsBanner({
+          name: accName.trim(),
+          username: cleanUsername,
+          password: pwd,
+          note: res.authMessage,
+        });
+      }
+    }
+
     setAdminToast(
-      `Created account for ${accName.trim()} (@${accUsername
-        .trim()
-        .toLowerCase()}) in role "${accDivision}" with password "${accPassword.trim()}".`
+      `Created member profile for ${accName.trim()} (@${cleanUsername}) in role "${accDivision}".`
     );
     setAccName('');
     setAccArabic('');
     setAccUsername('');
-    setAccPassword(`enp-${Math.floor(1000 + Math.random() * 9000)}`);
+    setAccPassword('');
+    setAccChessCom('');
   };
 
   const handleCreatePostSubmit = (e: React.FormEvent) => {
@@ -302,22 +347,28 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
     setAdminToast(`Added new club "${createdClub.clubName}" and switched workspace!`);
   };
 
-  const handleFileUpload = (
+  const handleFileUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
     field: 'customLogoUrl' | 'schoolLogoUrl' | 'clubBannerUrl'
   ) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        onUpdateClubConfig({
-          ...clubConfig,
-          [field]: reader.result,
-        });
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFile(file, {
+        maxWidth: field === 'clubBannerUrl' ? 1280 : 512,
+        maxHeight: field === 'clubBannerUrl' ? 720 : 512,
+        quality: 0.82,
+        maxChars: 170000,
+      });
+      onUpdateClubConfig({
+        ...clubConfig,
+        [field]: compressed,
+      });
+      setAdminToast('Updated club visual asset and synced to Cloud Firestore.');
+    } catch {
+      setAdminToast('Could not process uploaded image.');
+    }
   };
 
   const filteredMembers = members.filter((m) => {
@@ -338,69 +389,96 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
   const completedTournaments = tournaments.filter((t) => t.status === 'completed');
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-4">
+      <div className="flex flex-wrap items-end justify-between gap-2.5 sm:gap-4 border-b border-white/10 pb-3 sm:pb-4">
         <div>
-          <span className="text-xs font-mono-tabular text-[#26E6DE] tracking-wider uppercase">
-            CENTRAL ADMIN, ACCOUNT MANAGEMENT & NEXT-GEN INHERITANCE
+          <span className="text-[10px] sm:text-xs font-mono-tabular text-[#26E6DE] tracking-wider uppercase">
+            ADMIN &amp; NEXT-GEN CONTROL
           </span>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">
-            Admin Control Center ({clubConfig.clubName})
+          <h2 className="text-lg sm:text-3xl font-extrabold text-white mt-0.5 sm:mt-1">
+            Admin Center ({clubConfig.clubName})
           </h2>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
           {isAdminOrOwner && (
-            <a
-              href="/enp-chess-club-platform.zip"
-              download="enp-chess-club-platform.zip"
-              className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors bg-[#1E56A0] hover:bg-[#2563EB] border border-[#26E6DE]/40 text-white shadow-sm cursor-pointer"
+            <button
+              type="button"
+              onClick={handleExportClubBackup}
+              className="min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-colors bg-[#1E56A0] hover:bg-[#2563EB] border border-[#26E6DE]/40 text-white shadow-sm cursor-pointer"
             >
-              <Download className="w-4 h-4 text-[#26E6DE]" />
-              <span>Download Site & Firebase Zip</span>
-            </a>
+              <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#26E6DE]" />
+              <span className="sm:hidden">Backup</span>
+              <span className="hidden sm:inline">Export Club Backup (JSON)</span>
+            </button>
+          )}
+
+          {isOwner && onSyncClubToFirestore && (
+            <button
+              type="button"
+              disabled={isSyncingCloud}
+              onClick={async () => {
+                setIsSyncingCloud(true);
+                try {
+                  await onSyncClubToFirestore();
+                  setAdminToast('Synchronized all club data, roster, games, and tournaments to Cloud Firestore!');
+                } finally {
+                  setIsSyncingCloud(false);
+                }
+              }}
+              className="min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-colors bg-emerald-600/85 hover:bg-emerald-500 disabled:opacity-50 border border-emerald-400/40 text-white shadow-sm cursor-pointer"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span>
+                {isSyncingCloud
+                  ? 'Syncing...'
+                  : isCloudSynced
+                  ? 'Re-Sync Cloud'
+                  : 'Push to Cloud'}
+              </span>
+            </button>
           )}
 
           <button
             type="button"
             onClick={onToggleAndroidPreview}
-            className={`min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer ${
+            className={`min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
               androidPreviewMode
                 ? 'bg-[#FF6B00] text-white shadow-md'
                 : 'bg-white/8 hover:bg-white/15 border border-white/15 text-slate-200'
             }`}
           >
-            <Smartphone className="w-4 h-4 text-[#26E6DE]" />
-            {androidPreviewMode ? 'Exit Phone Frame' : 'Phone Frame (412×860)'}
+            <Smartphone className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#26E6DE]" />
+            <span>{androidPreviewMode ? 'Exit Frame' : 'Phone View'}</span>
           </button>
         </div>
       </div>
 
       {/* Role Status Callout */}
       {!isAdminOrOwner && (
-        <div className="p-4 sm:p-5 rounded-2xl bg-[#FF6B00]/15 border border-[#FF6B00]/40 flex flex-wrap items-center justify-between gap-4">
+        <div className="p-3 sm:p-5 rounded-xl sm:rounded-2xl bg-[#FF6B00]/15 border border-[#FF6B00]/40 flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1">
-            <div className="text-xs font-mono-tabular uppercase text-[#FF6B00] font-bold flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5" />
-              READ-ONLY PREVIEW MODE (ADMIN OR OWNER ACCOUNT REQUIRED FOR EDITS)
+            <div className="text-[10px] sm:text-xs font-mono-tabular uppercase text-[#FF6B00] font-bold flex items-center gap-1.5">
+              <Lock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              READ-ONLY MODE (ADMIN REQUIRED)
             </div>
-            <p className="text-xs sm:text-sm text-slate-200">
-              Sign in with the Owner or Admin account to assign custom club roles, pass ownership to the next generation, approve games, or manage accounts.
+            <p className="text-[11px] sm:text-sm text-slate-200">
+              Sign in with the Owner or Admin account to manage club edits.
             </p>
           </div>
           <button
             type="button"
             onClick={onOpenAuthModal}
-            className="min-h-[42px] px-4 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] text-white text-xs font-bold cursor-pointer shrink-0"
+            className="min-h-[32px] sm:min-h-[42px] px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] text-white text-[11px] sm:text-xs font-bold cursor-pointer shrink-0"
           >
-            Sign In / Switch Role
+            Sign In
           </button>
         </div>
       )}
 
       {adminToast && (
-        <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-400/30 text-xs sm:text-sm text-emerald-200 font-semibold flex items-center justify-between gap-3">
+        <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-emerald-500/15 border border-emerald-400/30 text-[11px] sm:text-sm text-emerald-200 font-semibold flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{adminToast}</span>
@@ -408,7 +486,7 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
           <button
             type="button"
             onClick={() => setAdminToast('')}
-            className="text-xs underline text-emerald-300 cursor-pointer"
+            className="text-[11px] sm:text-xs underline text-emerald-300 cursor-pointer shrink-0"
           >
             Dismiss
           </button>
@@ -416,46 +494,46 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
       )}
 
       {/* Sub-Navigation Bar */}
-      <div className="flex flex-wrap items-center gap-2 bg-[#08172E] p-1.5 rounded-2xl border border-white/10">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 bg-[#08172E] p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-white/10">
         <button
           type="button"
           onClick={() => setSubTab('accounts')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+          className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
             subTab === 'accounts'
               ? 'bg-[#FF6B00] text-white shadow'
               : 'text-slate-300 hover:text-white hover:bg-white/5'
           }`}
         >
-          <Key className="w-4 h-4" />
-          <span>Accounts & Custom Roles ({members.length})</span>
+          <Key className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <span>Members ({members.length})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setSubTab('inheritance')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+          className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
             subTab === 'inheritance'
               ? 'bg-[#FF6B00] text-white shadow'
               : 'text-slate-300 hover:text-white hover:bg-white/5'
           }`}
         >
-          <Crown className="w-4 h-4 text-amber-300" />
-          <span>Ownership Inheritance (Next Gen)</span>
+          <Crown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-300" />
+          <span>Inheritance</span>
         </button>
 
         <button
           type="button"
           onClick={() => setSubTab('approvals')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+          className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
             subTab === 'approvals'
               ? 'bg-[#FF6B00] text-white shadow'
               : 'text-slate-300 hover:text-white hover:bg-white/5'
           }`}
         >
-          <CheckCircle2 className="w-4 h-4" />
-          <span>Games & Tournament Cleanup</span>
+          <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <span>Approvals</span>
           {pendingGames.length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-black/35 text-[#26E6DE] font-mono-tabular text-[11px]">
+            <span className="px-1.5 py-0.5 rounded-full bg-black/35 text-[#26E6DE] font-mono-tabular text-[10px]">
               {pendingGames.length}
             </span>
           )}
@@ -464,27 +542,27 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
         <button
           type="button"
           onClick={() => setSubTab('posts')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+          className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
             subTab === 'posts'
               ? 'bg-[#FF6B00] text-white shadow'
               : 'text-slate-300 hover:text-white hover:bg-white/5'
           }`}
         >
-          <Megaphone className="w-4 h-4" />
-          <span>Home Posts ({posts.length})</span>
+          <Megaphone className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <span>Posts ({posts.length})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setSubTab('clubs')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+          className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
             subTab === 'clubs'
               ? 'bg-[#FF6B00] text-white shadow'
               : 'text-slate-300 hover:text-white hover:bg-white/5'
           }`}
         >
-          <Building2 className="w-4 h-4" />
-          <span>Clubs & Logos ({clubs.length})</span>
+          <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <span>Clubs ({clubs.length})</span>
         </button>
       </div>
 
@@ -543,10 +621,10 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-[#26E6DE] mb-1">
-                    Login Username
+                    Club Handle (Login Username)
                   </label>
                   <input
                     type="text"
@@ -559,15 +637,38 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-[#FF6B00] mb-1">
-                    Password Code
+                    Issued Login Password (Min 6 chars)
                   </label>
-                  <input
-                    type="text"
-                    value={accPassword}
-                    onChange={(e) => setAccPassword(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-mono-tabular rounded-xl border border-[#FF6B00]/40 bg-[#061020] text-white"
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={accPassword}
+                      onChange={(e) => setAccPassword(e.target.value)}
+                      placeholder="e.g., enp-482910"
+                      className="w-full px-3 py-2 text-xs font-mono-tabular rounded-xl border border-[#FF6B00]/40 bg-[#061020] text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAccPassword(generateRandomPasscode())}
+                      className="px-2.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-[11px] font-bold text-[#26E6DE] shrink-0 cursor-pointer"
+                    >
+                      Auto
+                    </button>
+                  </div>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Chess.com Username (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={accChessCom}
+                  onChange={(e) => setAccChessCom(e.target.value)}
+                  placeholder="e.g., altarmmah3"
+                  className="w-full px-3 py-2 text-xs font-mono-tabular rounded-xl border border-white/15 bg-[#061020] text-white"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -613,41 +714,22 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
                 </select>
               </div>
 
-              {/* Chess Specialty & Signature Opening */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-[#FF6B00] mb-1">
-                    Chess Specialty
-                  </label>
-                  <select
-                    value={accSpecialty}
-                    onChange={(e) => setAccSpecialty(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-white/15 bg-[#061020] text-white"
-                  >
-                    {CHESS_SPECIALTY_PRESETS.map((sp) => (
-                      <option key={sp} value={sp}>
-                        {sp}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-emerald-300 mb-1">
-                    Primary Opening Played
-                  </label>
-                  <select
-                    value={accOpening}
-                    onChange={(e) => setAccOpening(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-white/15 bg-[#061020] text-white"
-                  >
-                    {OPENING_REPERTOIRE_PRESETS.map((op) => (
-                      <option key={op} value={op}>
-                        {op}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              {/* Chess Specialty */}
+              <div>
+                <label className="block text-xs font-semibold text-[#FF6B00] mb-1">
+                  Chess Specialty
+                </label>
+                <select
+                  value={accSpecialty}
+                  onChange={(e) => setAccSpecialty(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-white/15 bg-[#061020] text-white"
+                >
+                  {CHESS_SPECIALTY_PRESETS.map((sp) => (
+                    <option key={sp} value={sp}>
+                      {sp}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
@@ -720,6 +802,47 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
               </div>
             </div>
 
+            {issuedCredsBanner && (
+              <div className="p-3.5 rounded-xl bg-[#061020] border border-[#26E6DE]/40 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-[#26E6DE] flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-[#FF6B00]" />
+                    Issued Club Account Credentials — {issuedCredsBanner.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIssuedCredsBanner(null)}
+                    className="text-[11px] text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="p-2.5 rounded-lg bg-black/50 border border-white/10 font-mono-tabular text-xs text-white flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    Username: <strong className="text-[#26E6DE]">@{issuedCredsBanner.username}</strong>{' '}
+                    · Password: <strong className="text-[#FF6B00]">{issuedCredsBanner.password}</strong>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(
+                        `ENP Chess Club Login\nUsername: ${issuedCredsBanner.username}\nPassword: ${issuedCredsBanner.password}`
+                      );
+                      setAdminToast(`Copied login credentials for @${issuedCredsBanner.username}!`);
+                    }}
+                    className="px-2.5 py-1 rounded bg-[#1E56A0] hover:bg-[#2563EB] text-white text-[11px] font-bold cursor-pointer"
+                  >
+                    Copy
+                  </button>
+                </div>
+                {issuedCredsBanner.note && (
+                  <p className="text-[11px] text-amber-300 leading-snug">
+                    {issuedCredsBanner.note}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
               {filteredMembers.map((m) => {
                 const divMeta = getRoleDivisionMeta(m.clubRoleDivision);
@@ -756,30 +879,10 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
                         </div>
                         <div className="text-[11px] text-slate-400">
                           {m.yearLevel} · {m.department}
-                          {m.email ? ` · ${m.email}` : ''}
                         </div>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {isAdminOrOwner && (
-                          <button
-                            type="button"
-                            onClick={() => handleCopyCredentials(m)}
-                            className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                          >
-                            {copiedCredId === m.id ? (
-                              <>
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                Copied!
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="w-3.5 h-3.5 text-[#26E6DE]" />
-                                Copy Login
-                              </>
-                            )}
-                          </button>
-                        )}
 
                         {isOwner && m.role !== 'owner' && (
                           <button
@@ -859,11 +962,11 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
 
                         <div className="sm:col-span-4">
                           <label className="block text-[10px] font-mono-tabular uppercase text-slate-400 mb-0.5">
-                            Opening Played & Specialty
+                            Most Played Opening & Specialty
                           </label>
                           <div className="text-[11px] text-slate-200 truncate">
                             <span className="text-[#26E6DE] font-semibold">
-                              {m.signatureOpening || m.openings[0]?.name || 'Italian Game'}
+                              {m.openings[0]?.name || m.signatureOpening || 'Pending PGN games'}
                             </span>{' '}
                             ·{' '}
                             <span className="text-[#FF6B00]">
@@ -872,18 +975,70 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
                           </div>
                         </div>
 
-                        <div className="sm:col-span-4 flex items-center justify-end gap-2 font-mono-tabular">
-                          <span className="text-slate-400">
-                            @{m.username}
+                        <div className="sm:col-span-4 flex flex-wrap items-center justify-end gap-1.5 font-mono-tabular text-xs">
+                          <span className="text-slate-400">@{m.username}</span>
+                          <span
+                            className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
+                              m.authUid
+                                ? 'bg-emerald-500/15 border-emerald-400/35 text-emerald-300'
+                                : 'bg-white/5 border-white/10 text-slate-400'
+                            }`}
+                          >
+                            {m.authUid ? 'Login Active' : 'No Login'}
                           </span>
-                          <input
-                            type="text"
-                            aria-label={`Password for ${m.name}`}
-                            value={m.passwordCode}
-                            onChange={(e) => onUpdateMemberPassword(m.id, e.target.value)}
-                            className="w-24 px-2 py-1 rounded-lg bg-black/40 border border-white/15 text-[#FF6B00] font-bold text-xs"
-                          />
+                          <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[#26E6DE]">
+                            R {m.fide.rapid}
+                          </span>
                         </div>
+
+                        {onProvisionMemberLogin && !m.authUid && m.role !== 'owner' && (
+                          <div className="sm:col-span-12 pt-2 border-t border-white/5 flex flex-wrap items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={rowPasswords[m.id] || ''}
+                              onChange={(e) =>
+                                setRowPasswords((prev) => ({ ...prev, [m.id]: e.target.value }))
+                              }
+                              placeholder={`Set password for @${m.username} (min 6 chars)`}
+                              className="flex-1 min-w-[180px] px-2.5 py-1 rounded-lg bg-black/40 border border-white/15 text-[11px] font-mono-tabular text-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRowPasswords((prev) => ({
+                                  ...prev,
+                                  [m.id]: generateRandomPasscode(),
+                                }))
+                              }
+                              className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[11px] font-bold text-[#26E6DE] cursor-pointer"
+                            >
+                              Auto
+                            </button>
+                            <button
+                              type="button"
+                              disabled={issuingMemberId === m.id}
+                              onClick={async () => {
+                                const pwd = (rowPasswords[m.id] || '').trim() || generateRandomPasscode();
+                                setIssuingMemberId(m.id);
+                                const res = await onProvisionMemberLogin(m.id, pwd);
+                                setIssuingMemberId(null);
+                                if (res.ok) {
+                                  setIssuedCredsBanner({
+                                    name: m.name,
+                                    username: m.username,
+                                    password: pwd,
+                                  });
+                                  setRowPasswords((prev) => ({ ...prev, [m.id]: '' }));
+                                }
+                                setAdminToast(res.message);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-[#FF6B00] hover:bg-[#FF8533] disabled:opacity-50 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Key className="w-3 h-3" />
+                              {issuingMemberId === m.id ? 'Issuing...' : 'Issue Login'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

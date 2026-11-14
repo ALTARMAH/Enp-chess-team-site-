@@ -19,13 +19,17 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isSignedIn() {
+    function isVerifiedUser() {
       return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
     }
 
     function isOwner() {
       return isSignedIn() && (
-        request.auth.token.email == 'fethallah2411@gmail.com' ||
+        (isVerifiedUser() && request.auth.token.email == 'fethallah2411@gmail.com') ||
         (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'owner')
       );
@@ -38,54 +42,135 @@ service cloud.firestore {
     }
 
     function clubExists(clubId) {
-      return exists(/databases/$(database)/documents/clubs/$(clubId));
+      return exists(/databases/$(database)/documents/clubs/$(clubId)) ||
+        existsAfter(/databases/$(database)/documents/clubs/$(clubId));
+    }
+
+    function isMemberOwnedByCaller(clubId, memberId) {
+      return isSignedIn() &&
+        isValidId(memberId) &&
+        exists(/databases/$(database)/documents/clubs/$(clubId)/members/$(memberId)) &&
+        get(/databases/$(database)/documents/clubs/$(clubId)/members/$(memberId)).data.authUid == request.auth.uid;
     }
 
     // Validation Blueprints
     function isValidAdminDoc(data) {
-      return data.keys().hasAll(['uid', 'email', 'role']) &&
-        data.keys().hasOnly(['uid', 'email', 'role', 'name']) &&
-        data.uid is string && data.uid.size() <= 128 &&
-        data.email is string && data.email.size() <= 160 &&
-        data.role in ['owner', 'admin'];
+      return data.keys().hasAll(['uid', 'role']) &&
+        data.keys().hasOnly(['uid', 'role', 'name']) &&
+        isValidId(data.uid) &&
+        data.role in ['owner', 'admin'] &&
+        (!('name' in data) || (data.name is string && data.name.size() <= 100));
     }
 
     function isValidClub(data, clubId) {
       return data.keys().hasAll(['clubId', 'clubName', 'universityName', 'primaryColor', 'accentColor', 'startingRating', 'weekMode']) &&
-        data.keys().hasOnly(['clubId', 'clubName', 'subtitleAr', 'universityName', 'city', 'primaryColor', 'secondaryColor', 'accentColor', 'customLogoUrl', 'schoolLogoUrl', 'clubBannerUrl', 'customHeroUrl', 'startingRating', 'weekMode', 'createdByUid']) &&
+        data.keys().hasOnly([
+          'clubId', 'clubName', 'subtitleAr', 'universityName', 'city',
+          'primaryColor', 'secondaryColor', 'accentColor',
+          'customLogoUrl', 'schoolLogoUrl', 'clubBannerUrl', 'customHeroUrl',
+          'startingRating', 'weekMode', 'createdByUid', 'updatedAt'
+        ]) &&
         data.clubId == clubId &&
         data.clubName is string && data.clubName.size() >= 2 && data.clubName.size() <= 100 &&
         data.universityName is string && data.universityName.size() >= 2 && data.universityName.size() <= 140 &&
         data.primaryColor is string && data.primaryColor.size() <= 20 &&
+        (!('secondaryColor' in data) || (data.secondaryColor is string && data.secondaryColor.size() <= 20)) &&
         data.accentColor is string && data.accentColor.size() <= 20 &&
-        data.startingRating is int && data.startingRating >= 800 && data.startingRating <= 2500 &&
+        (!('subtitleAr' in data) || (data.subtitleAr is string && data.subtitleAr.size() <= 160)) &&
+        (!('city' in data) || (data.city is string && data.city.size() <= 100)) &&
+        (!('customLogoUrl' in data) || (data.customLogoUrl is string && data.customLogoUrl.size() <= 200000)) &&
+        (!('schoolLogoUrl' in data) || (data.schoolLogoUrl is string && data.schoolLogoUrl.size() <= 200000)) &&
+        (!('clubBannerUrl' in data) || (data.clubBannerUrl is string && data.clubBannerUrl.size() <= 200000)) &&
+        (!('customHeroUrl' in data) || (data.customHeroUrl is string && data.customHeroUrl.size() <= 200000)) &&
+        (!('createdByUid' in data) || (data.createdByUid is string && data.createdByUid.size() <= 128)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 60)) &&
+        data.startingRating is number && data.startingRating >= 400 && data.startingRating <= 2500 &&
         data.weekMode in ['algeria_sat_thu', 'intl_mon_sat'];
     }
 
     function isValidMember(data, clubId, memberId) {
-      return data.keys().hasAll(['id', 'clubId', 'name', 'role', 'eloRapid', 'eloBlitz', 'eloClassical']) &&
-        data.keys().hasOnly(['id', 'clubId', 'name', 'arabicName', 'username', 'passwordCode', 'role', 'university', 'department', 'yearLevel', 'titleBadge', 'liveStatus', 'bio', 'avatarUrl', 'avatarInitials', 'avatarColor', 'joinedDate', 'eloRapid', 'eloBlitz', 'eloClassical', 'peakElo', 'delta30d', 'gamesPlayed', 'freeSlots']) &&
+      return data.keys().hasAll(['id', 'clubId', 'name', 'username', 'role', 'liveStatus', 'fide', 'glicko2']) &&
+        data.keys().hasOnly([
+          'id', 'clubId', 'authUid', 'name', 'arabicName', 'username', 'role',
+          'clubRoleDivision', 'chessSpecialty', 'signatureOpening',
+          'chessComUsername', 'onlineEloBracket', 'bringsEquipment',
+          'willingToCoach', 'willingToOrganize', 'clubExpectation',
+          'isDesignatedSuccessor', 'university', 'department', 'yearLevel',
+          'titleBadge', 'liveStatus', 'bio', 'avatarUrl', 'coverPhotoUrl',
+          'profilePhotos', 'avatarInitials', 'avatarColor', 'joinedDate',
+          'fide', 'glicko2', 'ratingHistory', 'openings', 'freeSlots',
+          'campusMeetupZoneId', 'gpsLocation', 'updatedAt'
+        ]) &&
         data.id == memberId &&
         data.clubId == clubId &&
+        (!('authUid' in data) || (data.authUid is string && data.authUid.size() <= 128)) &&
         data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+        (!('arabicName' in data) || (data.arabicName is string && data.arabicName.size() <= 100)) &&
+        data.username is string && data.username.size() >= 2 && data.username.size() <= 64 &&
         data.role in ['owner', 'admin', 'member'] &&
-        data.eloRapid is int && data.eloRapid >= 400 && data.eloRapid <= 3500 &&
-        data.eloBlitz is int && data.eloBlitz >= 400 && data.eloBlitz <= 3500 &&
-        data.eloClassical is int && data.eloClassical >= 400 && data.eloClassical <= 3500;
+        (!('clubRoleDivision' in data) || (data.clubRoleDivision is string && data.clubRoleDivision.size() <= 80)) &&
+        (!('chessSpecialty' in data) || (data.chessSpecialty is string && data.chessSpecialty.size() <= 120)) &&
+        (!('signatureOpening' in data) || (data.signatureOpening is string && data.signatureOpening.size() <= 160)) &&
+        (!('chessComUsername' in data) || (data.chessComUsername is string && data.chessComUsername.size() <= 80)) &&
+        (!('onlineEloBracket' in data) || (data.onlineEloBracket is string && data.onlineEloBracket.size() <= 80)) &&
+        (!('bringsEquipment' in data) || data.bringsEquipment is bool) &&
+        (!('willingToCoach' in data) || data.willingToCoach is bool) &&
+        (!('willingToOrganize' in data) || data.willingToOrganize is bool) &&
+        (!('clubExpectation' in data) || (data.clubExpectation is string && data.clubExpectation.size() <= 400)) &&
+        (!('isDesignatedSuccessor' in data) || data.isDesignatedSuccessor is bool) &&
+        (!('university' in data) || (data.university is string && data.university.size() <= 120)) &&
+        (!('department' in data) || (data.department is string && data.department.size() <= 120)) &&
+        (!('yearLevel' in data) || (data.yearLevel is string && data.yearLevel.size() <= 80)) &&
+        (!('titleBadge' in data) || (data.titleBadge is string && data.titleBadge.size() <= 100)) &&
+        data.liveStatus in ['campus_otb', 'online_ready', 'in_lecture'] &&
+        (!('bio' in data) || (data.bio is string && data.bio.size() <= 600)) &&
+        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 200000)) &&
+        (!('coverPhotoUrl' in data) || (data.coverPhotoUrl is string && data.coverPhotoUrl.size() <= 220000)) &&
+        (!('profilePhotos' in data) || (data.profilePhotos is list && data.profilePhotos.size() <= 12)) &&
+        (!('avatarInitials' in data) || (data.avatarInitials is string && data.avatarInitials.size() <= 8)) &&
+        (!('avatarColor' in data) || (data.avatarColor is string && data.avatarColor.size() <= 24)) &&
+        (!('joinedDate' in data) || (data.joinedDate is string && data.joinedDate.size() <= 40)) &&
+        data.fide is map &&
+        data.fide.rapid is number && data.fide.rapid >= 400 && data.fide.rapid <= 3500 &&
+        data.fide.blitz is number && data.fide.blitz >= 400 && data.fide.blitz <= 3500 &&
+        data.fide.classical is number && data.fide.classical >= 400 && data.fide.classical <= 3500 &&
+        data.glicko2 is map &&
+        (!('ratingHistory' in data) || (data.ratingHistory is list && data.ratingHistory.size() <= 250)) &&
+        (!('openings' in data) || (data.openings is list && data.openings.size() <= 60)) &&
+        (!('freeSlots' in data) || (data.freeSlots is list && data.freeSlots.size() <= 60)) &&
+        (!('campusMeetupZoneId' in data) || (data.campusMeetupZoneId is string && data.campusMeetupZoneId.size() <= 80)) &&
+        (!('gpsLocation' in data) || data.gpsLocation is map) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 60));
     }
 
     function isValidClubGame(data, clubId, gameId) {
       return data.keys().hasAll(['id', 'clubId', 'whiteId', 'blackId', 'result', 'timeControl', 'pgn', 'status']) &&
-        data.keys().hasOnly(['id', 'clubId', 'title', 'event', 'date', 'whiteId', 'blackId', 'result', 'timeControl', 'matchStakes', 'eco', 'openingName', 'pgn', 'status', 'submittedBy', 'whiteEloDelta', 'blackEloDelta', 'tournamentId', 'moves']) &&
+        data.keys().hasOnly([
+          'id', 'clubId', 'title', 'event', 'date', 'whiteId', 'blackId',
+          'result', 'timeControl', 'matchStakes', 'eco', 'openingName', 'pgn',
+          'status', 'submittedBy', 'submittedByUid', 'whiteEloDelta', 'blackEloDelta',
+          'tournamentId', 'moves'
+        ]) &&
         data.id == gameId &&
         data.clubId == clubId &&
+        (!('title' in data) || (data.title is string && data.title.size() <= 180)) &&
+        (!('event' in data) || (data.event is string && data.event.size() <= 140)) &&
+        (!('date' in data) || (data.date is string && data.date.size() <= 40)) &&
         data.whiteId is string && data.whiteId.size() <= 128 &&
         data.blackId is string && data.blackId.size() <= 128 &&
         data.result in ['1-0', '1/2-1/2', '0-1'] &&
         data.timeControl in ['rapid', 'blitz', 'classical'] &&
         (!('matchStakes' in data) || data.matchStakes in ['friendly', 'competitive', 'tournament']) &&
+        (!('eco' in data) || (data.eco is string && data.eco.size() <= 16)) &&
+        (!('openingName' in data) || (data.openingName is string && data.openingName.size() <= 160)) &&
         data.pgn is string && data.pgn.size() <= 10000 &&
-        data.status in ['approved', 'pending'];
+        data.status in ['approved', 'pending'] &&
+        (!('submittedBy' in data) || (data.submittedBy is string && data.submittedBy.size() <= 128)) &&
+        (!('submittedByUid' in data) || (data.submittedByUid is string && data.submittedByUid.size() <= 128)) &&
+        (!('whiteEloDelta' in data) || data.whiteEloDelta is number) &&
+        (!('blackEloDelta' in data) || data.blackEloDelta is number) &&
+        (!('tournamentId' in data) || (data.tournamentId is string && data.tournamentId.size() <= 128)) &&
+        (!('moves' in data) || (data.moves is list && data.moves.size() <= 400));
     }
 
     function isValidClubPost(data, clubId, postId) {
@@ -97,31 +182,69 @@ service cloud.firestore {
         data.category is string && data.category.size() <= 60 &&
         data.body is string && data.body.size() >= 2 && data.body.size() <= 4000 &&
         data.authorName is string && data.authorName.size() <= 100 &&
-        data.createdAt is string && data.createdAt.size() <= 60;
+        (!('authorRole' in data) || (data.authorRole is string && data.authorRole.size() <= 40)) &&
+        data.createdAt is string && data.createdAt.size() <= 60 &&
+        (!('pinned' in data) || data.pinned is bool);
     }
 
     function isValidTournament(data, clubId, tournamentId) {
-      return data.keys().hasAll(['id', 'clubId', 'name', 'format', 'timeControl', 'status']) &&
-        data.keys().hasOnly(['id', 'clubId', 'name', 'format', 'timeControl', 'status', 'currentRound', 'totalRounds', 'playerIds', 'matches', 'matchesJson', 'createdAt']) &&
+      return data.keys().hasAll(['id', 'clubId', 'name', 'format', 'timeControl', 'status', 'currentRound', 'totalRounds']) &&
+        data.keys().hasOnly(['id', 'clubId', 'name', 'format', 'timeControl', 'status', 'currentRound', 'totalRounds', 'playerIds', 'matches', 'createdAt']) &&
         data.id == tournamentId &&
         data.clubId == clubId &&
         data.name is string && data.name.size() >= 2 && data.name.size() <= 140 &&
         data.format in ['swiss', 'knockout', 'double_elimination', 'round_robin', 'double_round_robin', 'scheveningen', 'arena'] &&
         data.timeControl in ['rapid', 'blitz', 'classical'] &&
-        data.status in ['active', 'completed'];
+        data.status in ['active', 'completed'] &&
+        data.currentRound is number && data.currentRound >= 1 && data.currentRound <= 50 &&
+        data.totalRounds is number && data.totalRounds >= 1 && data.totalRounds <= 50 &&
+        (!('playerIds' in data) || (data.playerIds is list && data.playerIds.size() <= 128)) &&
+        (!('matches' in data) || (data.matches is list && data.matches.size() <= 300)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 60));
     }
 
     function isValidChatMessage(data, clubId, messageId) {
-      return data.keys().hasAll(['id', 'clubId', 'channelId', 'channelType', 'senderId', 'senderName', 'body', 'createdAt']) &&
-        data.keys().hasOnly(['id', 'clubId', 'channelId', 'channelType', 'senderId', 'senderName', 'senderRole', 'senderAvatarColor', 'senderInitials', 'recipientId', 'body', 'challengeMeta', 'createdAt']) &&
+      return data.keys().hasAll(['id', 'clubId', 'channelId', 'channelType', 'senderId', 'senderName', 'text', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'clubId', 'channelId', 'channelType', 'senderId', 'senderAuthUid',
+          'senderName', 'senderRole', 'recipientId', 'recipientAuthUid',
+          'participantAuthUids', 'text', 'challengeTimeControl', 'challengeStakes', 'createdAt'
+        ]) &&
         data.id == messageId &&
         data.clubId == clubId &&
         data.channelId is string && data.channelId.size() >= 1 && data.channelId.size() <= 128 &&
-        data.channelType in ['team', 'private'] &&
+        data.channelType in ['team', 'dm'] &&
         data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+        (!('senderAuthUid' in data) || (data.senderAuthUid is string && data.senderAuthUid.size() <= 128)) &&
         data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100 &&
-        data.body is string && data.body.size() >= 1 && data.body.size() <= 2000 &&
+        (!('senderRole' in data) || data.senderRole in ['owner', 'admin', 'member']) &&
+        (!('recipientId' in data) || (data.recipientId is string && data.recipientId.size() <= 128)) &&
+        (!('recipientAuthUid' in data) || (data.recipientAuthUid is string && data.recipientAuthUid.size() <= 128)) &&
+        (!('participantAuthUids' in data) || (data.participantAuthUids is list && data.participantAuthUids.size() <= 4)) &&
+        data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+        (!('challengeTimeControl' in data) || data.challengeTimeControl in ['rapid', 'blitz', 'classical']) &&
+        (!('challengeStakes' in data) || data.challengeStakes in ['friendly', 'competitive', 'tournament']) &&
         data.createdAt is string && data.createdAt.size() <= 60;
+    }
+
+    function isValidLineageRecord(data, clubId, recordId) {
+      return data.keys().hasAll(['id', 'clubId', 'generationLabel', 'fromOwnerId', 'toOwnerId', 'transferredAt']) &&
+        data.keys().hasOnly([
+          'id', 'clubId', 'generationLabel', 'MandatePeriod', 'fromOwnerId',
+          'fromOwnerName', 'toOwnerId', 'toOwnerName', 'toOwnerDepartment',
+          'transferredAt', 'legacyNote'
+        ]) &&
+        data.id == recordId &&
+        data.clubId == clubId &&
+        data.generationLabel is string && data.generationLabel.size() <= 120 &&
+        (!('MandatePeriod' in data) || (data.MandatePeriod is string && data.MandatePeriod.size() <= 80)) &&
+        data.fromOwnerId is string && data.fromOwnerId.size() <= 128 &&
+        (!('fromOwnerName' in data) || (data.fromOwnerName is string && data.fromOwnerName.size() <= 100)) &&
+        data.toOwnerId is string && data.toOwnerId.size() <= 128 &&
+        (!('toOwnerName' in data) || (data.toOwnerName is string && data.toOwnerName.size() <= 100)) &&
+        (!('toOwnerDepartment' in data) || (data.toOwnerDepartment is string && data.toOwnerDepartment.size() <= 140)) &&
+        data.transferredAt is string && data.transferredAt.size() <= 60 &&
+        (!('legacyNote' in data) || (data.legacyNote is string && data.legacyNote.size() <= 1000));
     }
 
     // 1. Admins Registry (Only Owner can grant/revoke admin documents)
@@ -135,31 +258,44 @@ service cloud.firestore {
     // 2. University Clubs (Public showcase read; Admins can create/update; ONLY Owner can delete)
     match /clubs/{clubId} {
       allow get: if isValidId(clubId);
-      allow list: if resource.data.startingRating >= 800;
+      allow list: if resource.data.startingRating >= 400;
       allow create: if isValidId(clubId) && isAdmin() && isValidClub(incoming(), clubId);
-      allow update: if isValidId(clubId) && isValidClub(incoming(), clubId) && isAdmin();
+      allow update: if isValidId(clubId) && isAdmin() && isValidClub(incoming(), clubId) && incoming().clubId == existing().clubId;
       allow delete: if isValidId(clubId) && isOwner();
     }
 
-    // 3. Club-Scoped Members
+    // 3. Club-Scoped Public Member Profiles (Zero PII; Admins manage roster; signed-in user may self-create with verified Google or update own profile fields)
     match /clubs/{clubId}/members/{memberId} {
       allow get: if isValidId(clubId) && isValidId(memberId);
       allow list: if resource.data.clubId == clubId;
-      allow create: if isValidId(clubId) && isValidId(memberId) && isAdmin() && isValidMember(incoming(), clubId, memberId) && clubExists(clubId);
-      allow update: if isValidId(clubId) && isValidId(memberId) && isValidMember(incoming(), clubId, memberId) && (
+      allow create: if isSignedIn() && isValidId(clubId) && isValidId(memberId) && isValidMember(incoming(), clubId, memberId) && clubExists(clubId) && (
         isAdmin() ||
-        (isSignedIn() && request.auth.uid == memberId && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['bio', 'liveStatus', 'freeSlots', 'avatarUrl']))
+        (isVerifiedUser() && memberId == request.auth.uid && incoming().authUid == request.auth.uid && incoming().role == 'member')
+      );
+      allow update: if isSignedIn() && isValidId(clubId) && isValidId(memberId) && isValidMember(incoming(), clubId, memberId) && incoming().id == existing().id && incoming().clubId == existing().clubId && (
+        isAdmin() ||
+        (
+          existing().authUid == request.auth.uid &&
+          incoming().role == existing().role &&
+          incoming().authUid == existing().authUid &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'bio', 'liveStatus', 'freeSlots', 'avatarUrl', 'coverPhotoUrl',
+            'profilePhotos', 'chessComUsername', 'chessSpecialty', 'signatureOpening',
+            'bringsEquipment', 'willingToCoach', 'willingToOrganize',
+            'campusMeetupZoneId', 'gpsLocation', 'updatedAt'
+          ])
+        )
       );
       allow delete: if isValidId(clubId) && isValidId(memberId) && isAdmin();
     }
 
-    // 4. Club-Scoped Games (Members can submit 'pending'; Admins can create/approve 'approved')
+    // 4. Club-Scoped Games (Provisioned/verified members can submit 'pending'; Admins can create/approve 'approved')
     match /clubs/{clubId}/games/{gameId} {
       allow get: if isValidId(clubId) && isValidId(gameId);
       allow list: if resource.data.clubId == clubId;
-      allow create: if isValidId(clubId) && isValidId(gameId) && isValidClubGame(incoming(), clubId, gameId) && clubExists(clubId) && (
+      allow create: if isSignedIn() && isValidId(clubId) && isValidId(gameId) && isValidClubGame(incoming(), clubId, gameId) && clubExists(clubId) && (
         isAdmin() ||
-        (isSignedIn() && incoming().status == 'pending' && incoming().submittedBy == request.auth.uid)
+        (incoming().status == 'pending' && incoming().submittedByUid == request.auth.uid && isMemberOwnedByCaller(clubId, incoming().submittedBy))
       );
       allow update: if isValidId(clubId) && isValidId(gameId) && isValidClubGame(incoming(), clubId, gameId) && isAdmin();
       allow delete: if isValidId(clubId) && isValidId(gameId) && isAdmin();
@@ -170,7 +306,7 @@ service cloud.firestore {
       allow get: if isValidId(clubId) && isValidId(postId);
       allow list: if resource.data.clubId == clubId;
       allow create: if isValidId(clubId) && isValidId(postId) && isAdmin() && isValidClubPost(incoming(), clubId, postId) && clubExists(clubId);
-      allow update: if isValidId(clubId) && isValidId(postId) && isValidClubPost(incoming(), clubId, postId) && isAdmin();
+      allow update: if isValidId(clubId) && isValidId(postId) && isAdmin() && isValidClubPost(incoming(), clubId, postId) && incoming().id == existing().id && incoming().clubId == existing().clubId;
       allow delete: if isValidId(clubId) && isValidId(postId) && isAdmin();
     }
 
@@ -179,7 +315,7 @@ service cloud.firestore {
       allow get: if isValidId(clubId) && isValidId(tournamentId);
       allow list: if resource.data.clubId == clubId;
       allow create: if isValidId(clubId) && isValidId(tournamentId) && isAdmin() && isValidTournament(incoming(), clubId, tournamentId) && clubExists(clubId);
-      allow update: if isValidId(clubId) && isValidId(tournamentId) && isValidTournament(incoming(), clubId, tournamentId) && isAdmin();
+      allow update: if isValidId(clubId) && isValidId(tournamentId) && isAdmin() && isValidTournament(incoming(), clubId, tournamentId) && incoming().id == existing().id && incoming().clubId == existing().clubId;
       allow delete: if isValidId(clubId) && isValidId(tournamentId) && isAdmin();
     }
 
@@ -188,19 +324,36 @@ service cloud.firestore {
       allow get: if isValidId(clubId) && isValidId(messageId) && (
         resource.data.channelType == 'team' ||
         isAdmin() ||
-        (isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid))
+        (isSignedIn() && (
+          resource.data.senderAuthUid == request.auth.uid ||
+          resource.data.recipientAuthUid == request.auth.uid ||
+          (resource.data.participantAuthUids is list && request.auth.uid in resource.data.participantAuthUids)
+        ))
       );
       allow list: if resource.data.clubId == clubId && (
         resource.data.channelType == 'team' ||
-        isAdmin() ||
-        (isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid))
+        (isSignedIn() && (
+          resource.data.senderAuthUid == request.auth.uid ||
+          resource.data.recipientAuthUid == request.auth.uid ||
+          request.auth.uid in resource.data.participantAuthUids
+        ))
       );
       allow create: if isValidId(clubId) && isValidId(messageId) && isSignedIn() && isValidChatMessage(incoming(), clubId, messageId) && clubExists(clubId) && (
-        isAdmin() || incoming().senderId == request.auth.uid
+        isAdmin() ||
+        (incoming().senderAuthUid == request.auth.uid && isMemberOwnedByCaller(clubId, incoming().senderId))
       );
       allow delete: if isValidId(clubId) && isValidId(messageId) && (
-        isAdmin() || (isSignedIn() && resource.data.senderId == request.auth.uid)
+        isAdmin() || (isSignedIn() && resource.data.senderAuthUid == request.auth.uid)
       );
+    }
+
+    // 8. Club-Scoped Next-Generation Ownership Lineage Records
+    match /clubs/{clubId}/lineage/{recordId} {
+      allow get: if isValidId(clubId) && isValidId(recordId);
+      allow list: if resource.data.clubId == clubId;
+      allow create: if isValidId(clubId) && isValidId(recordId) && isAdmin() && isValidLineageRecord(incoming(), clubId, recordId) && clubExists(clubId);
+      allow update: if isValidId(clubId) && isValidId(recordId) && isAdmin() && isValidLineageRecord(incoming(), clubId, recordId) && incoming().id == existing().id && incoming().clubId == existing().clubId;
+      allow delete: if isValidId(clubId) && isValidId(recordId) && isOwner();
     }
   }
 }

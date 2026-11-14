@@ -1,11 +1,22 @@
 {
   "entities": {
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Registry of platform owner and club admin UIDs.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["owner", "admin"] },
+        "name": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["uid", "role"]
+    },
     "Club": {
       "title": "Club",
       "description": "University chess club configuration and branding.",
       "type": "object",
       "properties": {
-        "clubId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "clubName": { "type": "string", "minLength": 2, "maxLength": 100 },
         "subtitleAr": { "type": "string", "maxLength": 160 },
         "universityName": { "type": "string", "minLength": 2, "maxLength": 140 },
@@ -13,53 +24,69 @@
         "primaryColor": { "type": "string", "maxLength": 20 },
         "secondaryColor": { "type": "string", "maxLength": 20 },
         "accentColor": { "type": "string", "maxLength": 20 },
-        "customLogoUrl": { "type": "string", "maxLength": 2048 },
-        "schoolLogoUrl": { "type": "string", "maxLength": 2048 },
-        "clubBannerUrl": { "type": "string", "maxLength": 2048 },
-        "customHeroUrl": { "type": "string", "maxLength": 2048 },
+        "customLogoUrl": { "type": "string", "maxLength": 200000 },
+        "schoolLogoUrl": { "type": "string", "maxLength": 200000 },
+        "clubBannerUrl": { "type": "string", "maxLength": 200000 },
+        "customHeroUrl": { "type": "string", "maxLength": 200000 },
         "startingRating": { "type": "number" },
         "weekMode": { "type": "string", "enum": ["algeria_sat_thu", "intl_mon_sat"] },
-        "createdByUid": { "type": "string", "maxLength": 128 }
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 60 }
       },
       "required": ["clubId", "clubName", "universityName", "primaryColor", "accentColor", "startingRating", "weekMode"]
     },
     "Member": {
       "title": "Member",
-      "description": "Club player profile with unified Rapid, Blitz, and Classical Elo ratings and club-scoped availability.",
+      "description": "Public club player profile without sensitive emails or plaintext passwords.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "clubId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authUid": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "minLength": 2, "maxLength": 100 },
         "arabicName": { "type": "string", "maxLength": 100 },
         "username": { "type": "string", "minLength": 2, "maxLength": 64 },
-        "passwordCode": { "type": "string", "maxLength": 64 },
         "role": { "type": "string", "enum": ["owner", "admin", "member"] },
+        "clubRoleDivision": { "type": "string", "maxLength": 80 },
+        "chessSpecialty": { "type": "string", "maxLength": 120 },
+        "signatureOpening": { "type": "string", "maxLength": 160 },
+        "chessComUsername": { "type": "string", "maxLength": 80 },
+        "onlineEloBracket": { "type": "string", "maxLength": 80 },
+        "bringsEquipment": { "type": "boolean" },
+        "willingToCoach": { "type": "boolean" },
+        "willingToOrganize": { "type": "boolean" },
+        "clubExpectation": { "type": "string", "maxLength": 400 },
+        "isDesignatedSuccessor": { "type": "boolean" },
         "university": { "type": "string", "maxLength": 120 },
         "department": { "type": "string", "maxLength": 120 },
         "yearLevel": { "type": "string", "maxLength": 80 },
-        "titleBadge": { "type": "string", "maxLength": 80 },
+        "titleBadge": { "type": "string", "maxLength": 100 },
         "liveStatus": { "type": "string", "enum": ["campus_otb", "online_ready", "in_lecture"] },
         "bio": { "type": "string", "maxLength": 600 },
+        "avatarUrl": { "type": "string", "maxLength": 200000 },
+        "coverPhotoUrl": { "type": "string", "maxLength": 220000 },
+        "profilePhotos": { "type": "array" },
         "avatarInitials": { "type": "string", "maxLength": 8 },
         "avatarColor": { "type": "string", "maxLength": 24 },
         "joinedDate": { "type": "string", "maxLength": 40 },
-        "eloRapid": { "type": "number" },
-        "eloBlitz": { "type": "number" },
-        "eloClassical": { "type": "number" },
-        "peakElo": { "type": "number" },
-        "delta30d": { "type": "number" },
-        "gamesPlayed": { "type": "number" }
+        "fide": { "type": "object" },
+        "glicko2": { "type": "object" },
+        "ratingHistory": { "type": "array" },
+        "openings": { "type": "array" },
+        "freeSlots": { "type": "array" },
+        "campusMeetupZoneId": { "type": "string", "maxLength": 80 },
+        "gpsLocation": { "type": "object" },
+        "updatedAt": { "type": "string", "maxLength": 60 }
       },
-      "required": ["id", "clubId", "name", "role", "eloRapid", "eloBlitz", "eloClassical"]
+      "required": ["id", "clubId", "name", "username", "role", "liveStatus", "fide", "glicko2"]
     },
     "ClubGame": {
       "title": "ClubGame",
-      "description": "Verified or pending chess match between two club members (with optional PGN or result-only logging) and Friendly/Competitive Elo stakes.",
+      "description": "Verified or pending chess match between two club members.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "clubId": { "type": "string", "maxLength": 64 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "title": { "type": "string", "maxLength": 180 },
         "event": { "type": "string", "maxLength": 140 },
         "date": { "type": "string", "maxLength": 40 },
@@ -68,12 +95,16 @@
         "result": { "type": "string", "enum": ["1-0", "1/2-1/2", "0-1"] },
         "timeControl": { "type": "string", "enum": ["rapid", "blitz", "classical"] },
         "matchStakes": { "type": "string", "enum": ["friendly", "competitive", "tournament"] },
-        "openingName": { "type": "string", "maxLength": 140 },
+        "eco": { "type": "string", "maxLength": 16 },
+        "openingName": { "type": "string", "maxLength": 160 },
         "pgn": { "type": "string", "maxLength": 10000 },
         "status": { "type": "string", "enum": ["approved", "pending"] },
         "submittedBy": { "type": "string", "maxLength": 128 },
+        "submittedByUid": { "type": "string", "maxLength": 128 },
         "whiteEloDelta": { "type": "number" },
-        "blackEloDelta": { "type": "number" }
+        "blackEloDelta": { "type": "number" },
+        "tournamentId": { "type": "string", "maxLength": 128 },
+        "moves": { "type": "array" }
       },
       "required": ["id", "clubId", "whiteId", "blackId", "result", "timeControl", "pgn", "status"]
     },
@@ -82,8 +113,8 @@
       "description": "Home screen news announcement or tournament recap created by club admins.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "clubId": { "type": "string", "maxLength": 64 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "title": { "type": "string", "minLength": 2, "maxLength": 160 },
         "category": { "type": "string", "maxLength": 60 },
         "body": { "type": "string", "minLength": 2, "maxLength": 4000 },
@@ -99,8 +130,8 @@
       "description": "Computer-paired club tournament across 7 formats.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "clubId": { "type": "string", "maxLength": 64 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "name": { "type": "string", "minLength": 2, "maxLength": 140 },
         "format": {
           "type": "string",
@@ -110,32 +141,56 @@
         "status": { "type": "string", "enum": ["active", "completed"] },
         "currentRound": { "type": "number" },
         "totalRounds": { "type": "number" },
+        "playerIds": { "type": "array" },
+        "matches": { "type": "array" },
         "createdAt": { "type": "string", "maxLength": 60 }
       },
-      "required": ["id", "clubId", "name", "format", "timeControl", "status"]
+      "required": ["id", "clubId", "name", "format", "timeControl", "status", "currentRound", "totalRounds"]
     },
     "ChatMessage": {
       "title": "ChatMessage",
-      "description": "Internal club team channel or 1-on-1 private direct message.",
+      "description": "Internal club team channel or 1-on-1 direct message.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "clubId": { "type": "string", "maxLength": 64 },
-        "channelId": { "type": "string", "maxLength": 128 },
-        "channelType": { "type": "string", "enum": ["team", "private"] },
-        "senderId": { "type": "string", "maxLength": 128 },
-        "senderName": { "type": "string", "maxLength": 100 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "channelId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "channelType": { "type": "string", "enum": ["team", "dm"] },
+        "senderId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "senderAuthUid": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "minLength": 1, "maxLength": 100 },
         "senderRole": { "type": "string", "enum": ["owner", "admin", "member"] },
         "recipientId": { "type": "string", "maxLength": 128 },
-        "body": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "challengeTimeControl": { "type": "string", "enum": ["rapid", "blitz", "classical"] },
+        "challengeStakes": { "type": "string", "enum": ["friendly", "competitive", "tournament"] },
         "createdAt": { "type": "string", "maxLength": 60 }
       },
-      "required": ["id", "clubId", "channelId", "channelType", "senderId", "senderName", "body", "createdAt"]
+      "required": ["id", "clubId", "channelId", "channelType", "senderId", "senderName", "text", "createdAt"]
+    },
+    "LineageRecord": {
+      "title": "LineageRecord",
+      "description": "Next-generation ownership inheritance handover record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "generationLabel": { "type": "string", "maxLength": 120 },
+        "MandatePeriod": { "type": "string", "maxLength": 80 },
+        "fromOwnerId": { "type": "string", "maxLength": 128 },
+        "fromOwnerName": { "type": "string", "maxLength": 100 },
+        "toOwnerId": { "type": "string", "maxLength": 128 },
+        "toOwnerName": { "type": "string", "maxLength": 100 },
+        "toOwnerDepartment": { "type": "string", "maxLength": 140 },
+        "transferredAt": { "type": "string", "maxLength": 60 },
+        "legacyNote": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["id", "clubId", "generationLabel", "fromOwnerId", "toOwnerId", "transferredAt"]
     }
   },
   "firestore": {
     "/admins/{adminUid}": {
-      "schema": "Member",
+      "schema": { "$ref": "#/entities/AdminRecord" },
       "description": "Registry of platform admin and owner UIDs."
     },
     "/clubs/{clubId}": {
@@ -144,15 +199,15 @@
     },
     "/clubs/{clubId}/members/{memberId}": {
       "schema": { "$ref": "#/entities/Member" },
-      "description": "Club-scoped member profiles and Elo ratings."
+      "description": "Public club-scoped member profiles and Elo ratings (zero PII)."
     },
     "/clubs/{clubId}/games/{gameId}": {
       "schema": { "$ref": "#/entities/ClubGame" },
-      "description": "Club-scoped PGN or result-only games (pending approval or approved)."
+      "description": "Club-scoped PGN or result-only games."
     },
     "/clubs/{clubId}/posts/{postId}": {
       "schema": { "$ref": "#/entities/ClubPost" },
-      "description": "Club-scoped home screen announcements and news posts."
+      "description": "Club-scoped home screen announcements."
     },
     "/clubs/{clubId}/tournaments/{tournamentId}": {
       "schema": { "$ref": "#/entities/Tournament" },
@@ -161,6 +216,10 @@
     "/clubs/{clubId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/ChatMessage" },
       "description": "Club-scoped team channel and private direct messages."
+    },
+    "/clubs/{clubId}/lineage/{recordId}": {
+      "schema": { "$ref": "#/entities/LineageRecord" },
+      "description": "Club-scoped next-generation ownership lineage records."
     }
   }
 }

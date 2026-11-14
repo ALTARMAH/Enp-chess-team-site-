@@ -3,6 +3,7 @@ import { TAL_BLED_1965_COMBINATION, ClubThemeConfig } from '../utils/clubData';
 import { parseFenBoard } from '../utils/chessEngine';
 import { ChessPieceSvg, playChessSound } from './ChessPieceSvg';
 import { ClubLogoBadge } from './ClubLogoBadge';
+import { compressImageFile } from '../utils/imageUtils';
 import { Zap, Play, Pause, SkipBack, SkipForward, Upload, Clock, Eye } from 'lucide-react';
 
 interface BroadcastHeroProps {
@@ -66,16 +67,21 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
     playChessSound('move');
   };
 
-  const handleHeroFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleHeroFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        onUpdateHeroArt(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFile(file, {
+        maxWidth: 1280,
+        maxHeight: 720,
+        quality: 0.82,
+        maxChars: 175000,
+      });
+      onUpdateHeroArt(compressed);
+    } catch {
+      // ignore invalid image
+    }
   };
 
   const whiteEvalPercent = Math.max(12, Math.min(92, Math.round(50 + currentStep.eval * 6.5)));
@@ -83,10 +89,10 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
   return (
     <section
       aria-label="Mikhail Tal Bled 1965 Combination Broadcast Showcase"
-      className="relative w-full max-w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 shadow-[0_24px_80px_rgba(0,0,0,0.65)]"
+      className="relative w-full max-w-full min-w-0 overflow-hidden rounded-2xl sm:rounded-3xl border border-white/10 shadow-[0_24px_80px_rgba(0,0,0,0.65)]"
     >
-      {/* Full-Bleed 16:9 Mikhail Tal Background Art that flows seamlessly into the site theme */}
-      <div className="relative w-full max-w-full min-w-0 min-h-[480px] sm:min-h-[540px] lg:min-h-[580px] flex flex-col justify-between p-3.5 sm:p-6 lg:p-8 overflow-hidden">
+      {/* Full-Bleed 16:9 Mikhail Tal Background Art */}
+      <div className="relative w-full max-w-full min-w-0 min-h-[320px] sm:min-h-[540px] lg:min-h-[580px] flex flex-col justify-between p-2.5 sm:p-6 lg:p-8 overflow-hidden">
         <img
           src={clubConfig.customHeroUrl || '/src/assets/images/mikhail_tal_brilliant_1794618787096.jpg'}
           alt="Mikhail Tal reaching from the shadows to play his 16. Nd5 Knight sacrifice in Bled 1965"
@@ -106,17 +112,17 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
           }}
         />
 
-        {/* Top Floating Broadcast Strip with Official ENP Chess Club + ENP School Logos */}
-        <div className="relative z-10 flex flex-wrap items-center justify-between gap-2.5 sm:gap-4 w-full max-w-full min-w-0">
-          <div className="max-w-full min-w-0 flex items-center gap-2.5 sm:gap-3 bg-[#061020]/85 backdrop-blur-md border border-white/15 rounded-2xl px-3 sm:px-3.5 py-2 shadow-xl">
-            <div className="flex items-center gap-2 shrink-0 max-w-full">
+        {/* Top Floating Broadcast Strip */}
+        <div className="relative z-10 flex flex-wrap items-center justify-between gap-2 sm:gap-4 w-full max-w-full min-w-0">
+          <div className="max-w-full min-w-0 flex items-center gap-2 sm:gap-3 bg-[#061020]/85 backdrop-blur-md border border-white/15 rounded-xl sm:rounded-2xl px-2.5 sm:px-3.5 py-1.5 sm:py-2 shadow-xl">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 max-w-full">
               <ClubLogoBadge
                 customLogoUrl={clubConfig.customLogoUrl}
                 accentColor={clubConfig.accentColor}
-                size="md"
+                size="sm"
               />
               {clubConfig.schoolLogoUrl && (
-                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-[#061020] border border-[#26E6DE]/35 shadow-sm flex items-center justify-center shrink-0 overflow-hidden">
+                <div className="hidden sm:flex w-10 h-10 rounded-xl bg-[#061020] border border-[#26E6DE]/35 shadow-sm items-center justify-center shrink-0 overflow-hidden">
                   <img
                     src={clubConfig.schoolLogoUrl}
                     alt={clubConfig.universityName}
@@ -127,16 +133,16 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
               )}
             </div>
             <div className="min-w-0 max-w-full">
-              <div className="text-[11px] sm:text-xs font-extrabold tracking-wide text-white truncate">
+              <div className="text-[10px] sm:text-xs font-extrabold tracking-wide text-white truncate">
                 {clubConfig.universityName}
               </div>
-              <div className="text-[10px] sm:text-[11px] font-mono-tabular text-[#26E6DE] font-semibold truncate">
+              <div className="hidden sm:block text-[11px] font-mono-tabular text-[#26E6DE] font-semibold truncate">
                 {clubConfig.subtitleAr}
               </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 max-w-full min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-full min-w-0">
             {isAdminOrOwner && (
               <>
                 <input
@@ -150,47 +156,48 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="min-h-[40px] px-3 py-2 rounded-xl text-xs font-medium bg-[#061020]/75 hover:bg-[#061020] text-slate-200 border border-white/15 backdrop-blur-md transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                  className="min-h-[30px] sm:min-h-[40px] px-2 sm:px-3 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-medium bg-[#061020]/75 hover:bg-[#061020] text-slate-200 border border-white/15 backdrop-blur-md transition-colors flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  <Upload className="w-3.5 h-3.5 text-[#FF6B00]" />
+                  <Upload className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#FF6B00]" />
                   <span className="hidden sm:inline">Swap 4K Hero Art</span>
-                  <span className="sm:hidden">4K Art</span>
+                  <span className="sm:hidden">Art</span>
                 </button>
               </>
             )}
             <button
               type="button"
               onClick={() => setShowOverlayBoard((v) => !v)}
-              className="min-h-[40px] px-3 py-2 rounded-xl text-xs font-semibold bg-[#061020]/75 hover:bg-[#061020] text-[#26E6DE] border border-[#26E6DE]/30 backdrop-blur-md transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+              className="min-h-[30px] sm:min-h-[40px] px-2 sm:px-3 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-semibold bg-[#061020]/75 hover:bg-[#061020] text-[#26E6DE] border border-[#26E6DE]/30 backdrop-blur-md transition-colors flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <Eye className="w-3.5 h-3.5" />
-              <span>{showOverlayBoard ? 'Full Tal Artwork' : '2D HUD Board'}</span>
+              <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden sm:inline">
+                {showOverlayBoard ? 'Full Tal Artwork' : '2D HUD Board'}
+              </span>
+              <span className="sm:hidden">{showOverlayBoard ? 'Art Only' : 'Board'}</span>
             </button>
             <button
               type="button"
               onClick={onOpenStudioWithCombination}
-              className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold bg-[#FF6B00] hover:bg-[#FF8533] text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-lg shadow-[#FF6B00]/25"
+              className="min-h-[30px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold bg-[#FF6B00] hover:bg-[#FF8533] text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-lg shadow-[#FF6B00]/25"
             >
-              Open in Studio
+              Studio
             </button>
           </div>
         </div>
 
         {/* Center Content: Left Editorial + Controls / Right Floating Glass Interactive Board */}
-        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-end my-auto pt-5 sm:pt-6 pb-3 w-full max-w-full min-w-0">
-          <div className="lg:col-span-7 min-w-0 max-w-full flex flex-col gap-3 sm:gap-4">
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-mono-tabular max-w-full min-w-0">
-              <span className="text-[#FF6B00] font-bold">THE MAGICIAN FROM RIGA</span>
-              <span className="text-white/40" aria-hidden="true">·</span>
-              <span className="text-slate-300">BLED CANDIDATES 1965</span>
+        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-6 items-end my-auto pt-3 sm:pt-6 pb-2 sm:pb-3 w-full max-w-full min-w-0">
+          <div className="lg:col-span-7 min-w-0 max-w-full flex flex-col gap-2 sm:gap-4">
+            <div className="flex flex-wrap items-center gap-1 sm:gap-2 text-[9px] sm:text-xs font-mono-tabular max-w-full min-w-0">
+              <span className="text-[#FF6B00] font-bold">TAL · BLED 1965</span>
               <span className="text-white/40" aria-hidden="true">·</span>
               <span className="text-[#26E6DE] font-bold">
-                STOCKFISH EVAL {currentStep.eval >= 0 ? `+${currentStep.eval.toFixed(2)}` : currentStep.eval.toFixed(2)}
+                EVAL {currentStep.eval >= 0 ? `+${currentStep.eval.toFixed(2)}` : currentStep.eval.toFixed(2)}
               </span>
             </div>
 
             <h1
-              className="text-2xl sm:text-4xl lg:text-[2.75rem] font-extrabold tracking-tight leading-[1.1] text-white drop-shadow-[0_4px_24px_rgba(0,0,0,0.8)] break-words max-w-full"
+              className="text-lg sm:text-4xl lg:text-[2.75rem] font-extrabold tracking-tight leading-[1.15] text-white drop-shadow-[0_4px_24px_rgba(0,0,0,0.8)] break-words max-w-full"
               style={{ textWrap: 'balance' }}
             >
               Chess Has Never Looked Like This:{' '}
@@ -199,64 +206,64 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
               </span>
             </h1>
 
-            <p className="text-xs sm:text-base text-slate-200 max-w-xl leading-relaxed drop-shadow break-words">
+            <p className="text-[11px] sm:text-base text-slate-200 max-w-xl leading-snug sm:leading-relaxed drop-shadow break-words">
               {currentStep.comment}
             </p>
 
             {/* Sleek Inline Clock & Strict Single-Turn Telemetry */}
-            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 pt-1 max-w-full min-w-0">
-              <div className="flex items-center bg-[#061020]/85 backdrop-blur-md border border-[#FF6B00]/50 rounded-2xl px-3 sm:px-4 py-2 sm:py-2.5 shadow-xl max-w-full min-w-0">
-                <Clock className="w-4 h-4 text-[#FF6B00] mr-2 sm:mr-3 shrink-0" />
-                <div className="flex items-center gap-2.5 sm:gap-4 font-mono-tabular max-w-full min-w-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-0.5 max-w-full min-w-0">
+              <div className="flex items-center bg-[#061020]/85 backdrop-blur-md border border-[#FF6B00]/50 rounded-xl sm:rounded-2xl px-2.5 sm:px-4 py-1.5 sm:py-2.5 shadow-xl max-w-full min-w-0">
+                <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#FF6B00] mr-2 sm:mr-3 shrink-0" />
+                <div className="flex items-center gap-2 sm:gap-4 font-mono-tabular max-w-full min-w-0">
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider text-slate-400">
-                      MIKHAIL TAL (W)
+                    <div className="text-[8px] sm:text-[10px] uppercase tracking-wider text-slate-400">
+                      TAL (W)
                     </div>
-                    <div className="text-base sm:text-xl font-bold text-[#FF6B00]">
+                    <div className="text-xs sm:text-xl font-bold text-[#FF6B00]">
                       04:{liveSecTick.toString().padStart(2, '0')}
                     </div>
                   </div>
-                  <span className="text-slate-600 text-base sm:text-xl">|</span>
+                  <span className="text-slate-600 text-xs sm:text-xl">|</span>
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider text-slate-400">
-                      BENT LARSEN (B)
+                    <div className="text-[8px] sm:text-[10px] uppercase tracking-wider text-slate-400">
+                      LARSEN (B)
                     </div>
-                    <div className="text-base sm:text-xl font-bold text-white">{currentStep.blackClock}</div>
+                    <div className="text-xs sm:text-xl font-bold text-white">{currentStep.blackClock}</div>
                   </div>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 font-mono-tabular text-xs text-slate-200 bg-[#061020]/80 backdrop-blur-md px-3 sm:px-4 py-2.5 rounded-2xl border border-white/10 max-w-full min-w-0">
-                <span className="px-2 py-0.5 rounded bg-white/10 text-[10px] uppercase font-bold text-[#26E6DE]">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 font-mono-tabular text-[11px] sm:text-xs text-slate-200 bg-[#061020]/80 backdrop-blur-md px-2.5 sm:px-4 py-1.5 sm:py-2.5 rounded-xl sm:rounded-2xl border border-white/10 max-w-full min-w-0">
+                <span className="px-1.5 py-0.5 rounded bg-white/10 text-[9px] sm:text-[10px] uppercase font-bold text-[#26E6DE]">
                   {currentStep.movedBy}
                 </span>
-                <span className="text-sm sm:text-base font-bold text-white">{currentStep.moveLabel}</span>
+                <span className="text-xs sm:text-base font-bold text-white">{currentStep.moveLabel}</span>
                 <span className="text-[#26E6DE] font-bold">
-                  · Eval {currentStep.eval >= 0 ? `+${currentStep.eval.toFixed(2)}` : currentStep.eval.toFixed(2)}
+                  · {currentStep.eval >= 0 ? `+${currentStep.eval.toFixed(2)}` : currentStep.eval.toFixed(2)}
                 </span>
               </div>
             </div>
 
             {/* Interactive Controls */}
-            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 pt-1 max-w-full min-w-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-0.5 max-w-full min-w-0">
               <button
                 type="button"
                 onClick={handleJumpToKeySacrifice}
-                className="w-full sm:w-auto max-w-full min-h-[46px] px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs sm:text-sm bg-[#FF6B00] hover:bg-[#FF8533] text-white shadow-[0_0_30px_rgba(255,107,0,0.45)] transition-all flex items-center justify-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
+                className="w-full sm:w-auto max-w-full min-h-[34px] sm:min-h-[46px] px-3 sm:px-5 py-1.5 sm:py-3 rounded-xl sm:rounded-2xl font-bold text-[11px] sm:text-sm bg-[#FF6B00] hover:bg-[#FF8533] text-white shadow-[0_0_24px_rgba(255,107,0,0.4)] transition-all flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 cursor-pointer"
               >
-                <Zap className="w-4 h-4 fill-current shrink-0" />
-                <span>Jump to 16. Nd5 Knight Sacrifice</span>
+                <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current shrink-0" />
+                <span>Jump to 16. Nd5 Sacrifice</span>
               </button>
 
-              <div className="w-full sm:w-auto max-w-full flex items-center justify-between sm:justify-start gap-1 bg-[#061020]/85 backdrop-blur-md p-1.5 rounded-2xl border border-white/15">
+              <div className="w-full sm:w-auto max-w-full flex items-center justify-between sm:justify-start gap-1 bg-[#061020]/85 backdrop-blur-md p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-white/15">
                 <button
                   type="button"
                   onClick={() => handleStep(-1)}
                   disabled={stepIndex === 0}
                   aria-label="Previous combination move"
-                  className="min-h-[40px] flex-1 sm:flex-initial px-3 py-1.5 rounded-xl text-xs font-medium text-slate-200 hover:bg-white/10 disabled:opacity-40 transition-colors flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                  className="min-h-[30px] sm:min-h-[40px] flex-1 sm:flex-initial px-2.5 sm:px-3 py-1 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-medium text-slate-200 hover:bg-white/10 disabled:opacity-40 transition-colors flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  <SkipBack className="w-3.5 h-3.5" />
+                  <SkipBack className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                   Prev
                 </button>
                 <button
@@ -264,22 +271,26 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
                   onClick={() => handleStep(1)}
                   disabled={stepIndex === TAL_BLED_1965_COMBINATION.steps.length - 1}
                   aria-label="Next combination move"
-                  className="min-h-[40px] flex-1 sm:flex-initial px-3 py-1.5 rounded-xl text-xs font-medium text-slate-200 hover:bg-white/10 disabled:opacity-40 transition-colors flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                  className="min-h-[30px] sm:min-h-[40px] flex-1 sm:flex-initial px-2.5 sm:px-3 py-1 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-medium text-slate-200 hover:bg-white/10 disabled:opacity-40 transition-colors flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   Next
-                  <SkipForward className="w-3.5 h-3.5" />
+                  <SkipForward className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsAutoPlaying((p) => !p)}
-                  className={`min-h-[40px] flex-1 sm:flex-initial px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+                  className={`min-h-[30px] sm:min-h-[40px] flex-1 sm:flex-initial px-2.5 sm:px-3 py-1 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-colors flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer ${
                     isAutoPlaying
                       ? 'bg-[#26E6DE] text-[#061020]'
                       : 'text-slate-200 hover:bg-white/10'
                   }`}
                 >
-                  {isAutoPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                  {isAutoPlaying ? 'Pause' : 'Auto-Replay'}
+                  {isAutoPlaying ? (
+                    <Pause className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  ) : (
+                    <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  )}
+                  {isAutoPlaying ? 'Pause' : 'Replay'}
                 </button>
               </div>
             </div>
@@ -288,22 +299,22 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
           {/* Right Column: Translucent HUD Interactive Board */}
           <div className="lg:col-span-5 min-w-0 max-w-full flex items-center justify-center lg:justify-end">
             {showOverlayBoard && (
-              <div className="relative flex items-stretch gap-2.5 sm:gap-3 bg-[#061020]/70 backdrop-blur-md p-2.5 sm:p-3 rounded-2xl border border-[#26E6DE]/30 shadow-2xl max-w-full min-w-0">
+              <div className="relative flex items-stretch gap-2 sm:gap-3 bg-[#061020]/70 backdrop-blur-md p-2 sm:p-3 rounded-xl sm:rounded-2xl border border-[#26E6DE]/30 shadow-2xl max-w-full min-w-0">
                 <div
-                  className="w-6 sm:w-7 rounded-lg overflow-hidden bg-[#040B16] border border-white/15 flex flex-col justify-end relative shrink-0"
+                  className="w-5 sm:w-7 rounded-md sm:rounded-lg overflow-hidden bg-[#040B16] border border-white/15 flex flex-col justify-end relative shrink-0"
                   title={`Stockfish Evaluation: +${currentStep.eval.toFixed(2)}`}
                 >
                   <div
                     className="w-full bg-gradient-to-t from-white via-slate-100 to-[#26E6DE] transition-all duration-300"
                     style={{ height: `${whiteEvalPercent}%` }}
                   />
-                  <span className="absolute top-1.5 left-0 right-0 text-center text-[9px] font-mono-tabular font-bold text-[#26E6DE]">
+                  <span className="absolute top-1 left-0 right-0 text-center text-[8px] sm:text-[9px] font-mono-tabular font-bold text-[#26E6DE]">
                     +{currentStep.eval.toFixed(1)}
                   </span>
                 </div>
 
                 <div className="relative max-w-full">
-                  <div className="w-[220px] h-[220px] sm:w-[252px] sm:h-[252px] rounded-xl overflow-hidden border border-white/20 grid grid-cols-8 grid-rows-8">
+                  <div className="w-[180px] h-[180px] sm:w-[252px] sm:h-[252px] rounded-lg sm:rounded-xl overflow-hidden border border-white/20 grid grid-cols-8 grid-rows-8">
                     {boardMatrix.map((row, rIdx) =>
                       row.map((piece, cIdx) => {
                         const squareName = `${FILES[cIdx]}${RANKS[rIdx]}`;
@@ -344,8 +355,8 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
         </div>
 
         {/* Bottom Combination Move Timeline */}
-        <div className="relative z-10 min-w-0 w-full max-w-full pt-3 border-t border-white/10 overflow-hidden">
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 w-full max-w-full min-w-0">
+        <div className="relative z-10 min-w-0 w-full max-w-full pt-2 sm:pt-3 border-t border-white/10 overflow-hidden">
+          <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar py-0.5 sm:py-1 w-full max-w-full min-w-0">
             {TAL_BLED_1965_COMBINATION.steps.map((s, idx) => {
               const active = idx === stepIndex;
               return (
@@ -357,7 +368,7 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
                     setStepIndex(idx);
                     playChessSound('move');
                   }}
-                  className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-mono-tabular transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                  className={`min-h-[28px] sm:min-h-[38px] px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-mono-tabular transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                     active
                       ? 'bg-[#FF6B00] text-white font-bold'
                       : 'bg-white/5 text-slate-300 hover:bg-white/15'

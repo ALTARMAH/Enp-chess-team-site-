@@ -11,6 +11,7 @@ import {
   RIVALRY_HEADER_BANNER_4K,
 } from '../utils/clubData';
 import { MatchOutcome, MatchStakes, TimeControl, previewEloMatch } from '../utils/chessEngine';
+import { compressImageFile } from '../utils/imageUtils';
 import {
   Camera,
   Swords,
@@ -206,46 +207,59 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
     })
     .sort((a, b) => b.fide[sortTimeControl] - a.fide[sortTimeControl]);
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!canEditSelectedProfile) return;
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        onUpdateMemberAvatar(selectedMember.id, reader.result);
-        setUploadSuccessBanner(`Updated ${selectedMember.name}'s profile picture!`);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFile(file, {
+        maxWidth: 512,
+        maxHeight: 512,
+        quality: 0.82,
+        maxChars: 140000,
+      });
+      onUpdateMemberAvatar(selectedMember.id, compressed);
+      setUploadSuccessBanner(`Updated ${selectedMember.name}'s profile picture!`);
+    } catch {
+      setUploadSuccessBanner('Could not process profile picture image.');
+    }
   };
 
-  const handleCoverPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!canEditSelectedProfile) return;
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        onUpdateMemberCoverPhoto(selectedMember.id, reader.result);
-        setUploadSuccessBanner(`Updated ${selectedMember.name}'s cover photo banner!`);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFile(file, {
+        maxWidth: 1280,
+        maxHeight: 640,
+        quality: 0.82,
+        maxChars: 175000,
+      });
+      onUpdateMemberCoverPhoto(selectedMember.id, compressed);
+      setUploadSuccessBanner(`Updated ${selectedMember.name}'s cover photo banner!`);
+    } catch {
+      setUploadSuccessBanner('Could not process cover photo image.');
+    }
   };
 
-  const handleGalleryFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleGalleryFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setNewPhotoPreviewUrl(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFile(file, {
+        maxWidth: 960,
+        maxHeight: 720,
+        quality: 0.78,
+        maxChars: 130000,
+      });
+      setNewPhotoPreviewUrl(compressed);
+    } catch {
+      // ignore invalid image
+    }
   };
 
   const handleCreatePhotoPostSubmit = (e: React.FormEvent) => {
@@ -387,32 +401,32 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
   );
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-4">
+      <div className="flex flex-wrap items-end justify-between gap-2.5 sm:gap-4 border-b border-white/10 pb-3 sm:pb-4">
         <div>
-          <span className="text-xs font-mono-tabular text-[#26E6DE] tracking-wider uppercase">
-            CLUB ROSTER & UNIFIED ELO RATINGS · RAPID · BLITZ · CLASSICAL (BY DECLARED BRACKET)
+          <span className="text-[10px] sm:text-xs font-mono-tabular text-[#26E6DE] tracking-wider uppercase">
+            CLUB ROSTER · RAPID · BLITZ · CLASSICAL
           </span>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">
-            Club Members, Profiles & Game Archives
+          <h2 className="text-lg sm:text-3xl font-extrabold text-white mt-0.5 sm:mt-1">
+            Club Members &amp; Profiles
           </h2>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1 p-1 bg-[#08172E] rounded-xl border border-white/10">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1 p-0.5 sm:p-1 bg-[#08172E] rounded-lg sm:rounded-xl border border-white/10">
             {(['rapid', 'blitz', 'classical'] as const).map((tc) => (
               <button
                 key={tc}
                 type="button"
                 onClick={() => setSortTimeControl(tc)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer uppercase font-mono-tabular ${
+                className={`px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-semibold rounded-md sm:rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer uppercase font-mono-tabular ${
                   sortTimeControl === tc
                     ? 'bg-[#FF6B00] text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Sort: {tc}
+                {tc}
               </button>
             ))}
           </div>
@@ -421,26 +435,28 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
             <button
               type="button"
               onClick={onOpenAdminTab}
-              className="min-h-[40px] px-4 py-2 rounded-xl text-xs font-bold bg-[#1E56A0] hover:bg-[#2563EB] text-white transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
+              className="min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold bg-[#1E56A0] hover:bg-[#2563EB] text-white transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <UserPlus className="w-4 h-4 text-[#26E6DE]" />
-              Manage Accounts & Passwords in Admin Tab
+              <UserPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#26E6DE]" />
+              <span className="sm:hidden">Manage Accounts</span>
+              <span className="hidden sm:inline">Manage Accounts &amp; Passwords in Admin Tab</span>
             </button>
           ) : !currentUser ? (
             <button
               type="button"
               onClick={onOpenAuthModal}
-              className="min-h-[40px] px-4 py-2 rounded-xl text-xs font-bold bg-[#FF6B00] hover:bg-[#FF8533] text-white transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
+              className="min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold bg-[#FF6B00] hover:bg-[#FF8533] text-white transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <Lock className="w-3.5 h-3.5" />
-              Sign In to Edit Your Profile
+              <Lock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="sm:hidden">Sign In</span>
+              <span className="hidden sm:inline">Sign In to Edit Your Profile</span>
             </button>
           ) : null}
         </div>
       </div>
 
       {uploadSuccessBanner && (
-        <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-400/30 text-xs sm:text-sm text-emerald-200 font-semibold flex items-center justify-between gap-3">
+        <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-emerald-500/15 border border-emerald-400/30 text-[11px] sm:text-sm text-emerald-200 font-semibold flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{uploadSuccessBanner}</span>
@@ -448,7 +464,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
           <button
             type="button"
             onClick={() => setUploadSuccessBanner('')}
-            className="text-xs underline text-emerald-300 cursor-pointer"
+            className="text-[11px] sm:text-xs underline text-emerald-300 cursor-pointer shrink-0"
           >
             Dismiss
           </button>
@@ -457,27 +473,27 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
 
       {/* DIRECTORY FILTER BAR & LEADERBOARD */}
       <div className="broadcast-panel rounded-2xl overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-white/10 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="p-3 sm:p-5 border-b border-white/10 flex flex-col lg:flex-row lg:items-center justify-between gap-2 sm:gap-3">
           <div className="relative flex-1 min-w-0">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search member by name, role (IT, COMM, Coaching), opening, or department..."
+              placeholder="Search member, role, opening, dept..."
               aria-label="Search club members"
-              className="w-full min-h-[42px] pl-9 pr-4 py-2 text-sm rounded-xl border border-white/15 bg-[#061020]/80 text-white placeholder:text-slate-500 focus:outline-none focus:border-[#26E6DE]"
+              className="w-full min-h-[34px] sm:min-h-[42px] pl-8 sm:pl-9 pr-3 py-1.5 sm:py-2 text-xs sm:text-sm rounded-lg sm:rounded-xl border border-white/15 bg-[#061020]/80 text-white placeholder:text-slate-500 focus:outline-none focus:border-[#26E6DE]"
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <select
               aria-label="Filter by club role division"
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value)}
-              className="min-h-[42px] px-3 py-2 text-xs font-semibold rounded-xl border border-[#26E6DE]/40 bg-[#061020] text-[#26E6DE]"
+              className="min-h-[34px] sm:min-h-[42px] px-2.5 sm:px-3 py-1 sm:py-2 text-[11px] sm:text-xs font-semibold rounded-lg sm:rounded-xl border border-[#26E6DE]/40 bg-[#061020] text-[#26E6DE]"
             >
-              <option value="ALL">All Club Roles ({members.length})</option>
+              <option value="ALL">All Roles ({members.length})</option>
               {CLUB_ROLE_DIVISIONS.map((div) => (
                 <option key={div.id} value={div.id}>
                   Role: {div.id}
@@ -491,9 +507,9 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
               aria-label="Filter by live campus status"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="min-h-[42px] px-3 py-2 text-xs font-medium rounded-xl border border-white/15 bg-[#061020] text-slate-200"
+              className="min-h-[34px] sm:min-h-[42px] px-2.5 sm:px-3 py-1 sm:py-2 text-[11px] sm:text-xs font-medium rounded-lg sm:rounded-xl border border-white/15 bg-[#061020] text-slate-200"
             >
-              <option value="ALL">All Campus Statuses</option>
+              <option value="ALL">All Statuses</option>
               <option value="campus_otb">On Campus OTB</option>
               <option value="online_ready">Online Ready</option>
               <option value="in_lecture">In Lecture</option>
@@ -502,7 +518,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
         </div>
 
         {/* MOBILE PHONE TAP-CARD ROSTER (< 768px) */}
-        <div className="md:hidden divide-y divide-white/10 max-h-[340px] overflow-y-auto">
+        <div className="md:hidden divide-y divide-white/10 max-h-[280px] overflow-y-auto">
           {filteredMembers.map((m, idx) => {
             const isSelected = m.id === selectedMember.id;
             return (
@@ -510,12 +526,12 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                 key={m.id}
                 type="button"
                 onClick={() => onSelectMember(m.id)}
-                className={`w-full p-3.5 text-left transition-colors flex items-center justify-between gap-3 cursor-pointer ${
+                className={`w-full p-2.5 text-left transition-colors flex items-center justify-between gap-2 cursor-pointer ${
                   isSelected ? 'bg-[#1E56A0]/35' : 'hover:bg-white/5'
                 }`}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="font-mono-tabular text-xs font-bold text-slate-400 w-5 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-mono-tabular text-[11px] font-bold text-slate-400 w-5 shrink-0">
                     #{idx + 1}
                   </span>
                   {m.avatarUrl ? (
@@ -523,22 +539,22 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                       src={m.avatarUrl}
                       alt={m.name}
                       referrerPolicy="no-referrer"
-                      className="w-10 h-10 rounded-full object-cover border border-white/20 shrink-0"
+                      className="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0"
                     />
                   ) : (
                     <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-xs shrink-0"
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-[10px] shrink-0"
                       style={{ backgroundColor: m.avatarColor }}
                     >
                       {m.avatarInitials}
                     </div>
                   )}
                   <div className="min-w-0">
-                    <div className="font-bold text-sm text-white truncate flex items-center gap-1.5">
+                    <div className="font-bold text-xs text-white truncate flex items-center gap-1">
                       <span className="truncate">{m.name}</span>
                       {renderRoleBadge(m.role)}
                     </div>
-                    <div className="text-[11px] text-[#26E6DE] truncate">{m.department}</div>
+                    <div className="text-[10px] text-[#26E6DE] truncate">{m.department}</div>
                     {(() => {
                       const cc = getChessComLinkInfo(m.chessComUsername);
                       if (!cc) return null;
@@ -548,24 +564,24 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-1 text-[11px] font-mono-tabular text-[#26E6DE] hover:text-white underline decoration-[#26E6DE]/40 mt-0.5"
+                          className="inline-flex items-center gap-1 text-[10px] font-mono-tabular text-[#26E6DE] hover:text-white underline decoration-[#26E6DE]/40 mt-0.5"
                         >
-                          <span>chess.com/member/{cc.handle}</span>
-                          <ExternalLink className="w-3 h-3 shrink-0" />
+                          <span>@{cc.handle}</span>
+                          <ExternalLink className="w-2.5 h-2.5 shrink-0" />
                         </a>
                       );
                     })()}
-                    <div className="text-[11px] text-slate-400 font-mono-tabular mt-0.5">
-                      Rapid {m.fide.rapid} · Blitz {m.fide.blitz} · Classic {m.fide.classical}
+                    <div className="text-[10px] text-slate-400 font-mono-tabular mt-0.5">
+                      R {m.fide.rapid} · B {m.fide.blitz} · C {m.fide.classical}
                     </div>
                   </div>
                 </div>
 
                 <div className="text-right font-mono-tabular shrink-0">
-                  <div className="text-base font-extrabold text-[#FF6B00]">
+                  <div className="text-sm font-extrabold text-[#FF6B00]">
                     {m.fide[sortTimeControl]}
                   </div>
-                  <div className="text-[10px] uppercase text-slate-400">{sortTimeControl} Elo</div>
+                  <div className="text-[9px] uppercase text-slate-400">{sortTimeControl}</div>
                 </div>
               </button>
             );
@@ -749,7 +765,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
       {/* SELECTED PLAYER DOSSIER (FACEBOOK-STYLE COVER PHOTO + PROFILE AVATAR + PHOTO WALL) */}
       <div className="broadcast-panel rounded-2xl overflow-hidden">
         {/* Facebook-Style 16:9 Cover Photo Banner */}
-        <div className="relative h-44 sm:h-60 w-full overflow-hidden bg-[#082556] border-b border-white/10">
+        <div className="relative h-28 sm:h-60 w-full overflow-hidden bg-[#082556] border-b border-white/10">
           <img
             src={
               selectedMember.coverPhotoUrl ||
@@ -782,30 +798,30 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                     coverUploadRef.current?.click();
                   }
                 }}
-                className="absolute top-3 right-3 sm:top-4 sm:right-5 z-30 min-h-[40px] px-3.5 py-2 rounded-xl bg-[#061020]/90 hover:bg-[#0B1C38] text-white border border-white/25 backdrop-blur-md text-xs font-bold inline-flex items-center gap-2 shadow-xl cursor-pointer select-none transition-colors"
+                className="absolute top-2.5 right-2.5 sm:top-4 sm:right-5 z-30 min-h-[28px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1 sm:py-2 rounded-lg sm:rounded-xl bg-[#061020]/90 hover:bg-[#0B1C38] text-white border border-white/25 backdrop-blur-md text-[10px] sm:text-xs font-bold inline-flex items-center gap-1.5 shadow-xl cursor-pointer select-none transition-colors"
               >
-                <Camera className="w-4 h-4 text-[#FF6B00]" />
-                <span>Edit Cover Photo</span>
+                <Camera className="w-3 h-3 sm:w-4 sm:h-4 text-[#FF6B00]" />
+                <span>Edit Cover</span>
               </label>
             </>
           )}
         </div>
 
         {/* Profile Identity Bar (Overlapping Avatar like Facebook) */}
-        <div className="px-4 sm:px-8 pb-6 pt-3 cad-grid-dark border-b border-white/10">
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 -mt-12 sm:-mt-16 relative z-10 pointer-events-none">
-            <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4 sm:gap-5 pointer-events-auto">
+        <div className="px-3 sm:px-8 pb-4 sm:pb-6 pt-2 sm:pt-3 cad-grid-dark border-b border-white/10">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3.5 sm:gap-5 -mt-9 sm:-mt-16 relative z-10 pointer-events-none">
+            <div className="flex flex-col sm:flex-row items-start sm:items-end gap-3 sm:gap-5 pointer-events-auto">
               <div className="relative group shrink-0">
                 {selectedMember.avatarUrl ? (
                   <img
                     src={selectedMember.avatarUrl}
                     alt={selectedMember.name}
                     referrerPolicy="no-referrer"
-                    className="w-24 h-24 sm:w-32 sm:h-32 rounded-2xl object-cover border-4 border-[#061020] ring-2 ring-[#FF6B00] shadow-2xl bg-[#061020]"
+                    className="w-16 h-16 sm:w-32 sm:h-32 rounded-xl sm:rounded-2xl object-cover border-[3px] sm:border-4 border-[#061020] ring-2 ring-[#FF6B00] shadow-2xl bg-[#061020]"
                   />
                 ) : (
                   <div
-                    className="w-24 h-24 sm:w-32 sm:h-32 rounded-2xl flex items-center justify-center text-3xl sm:text-4xl font-extrabold text-white border-4 border-[#061020] ring-2 ring-white/25 shadow-2xl"
+                    className="w-16 h-16 sm:w-32 sm:h-32 rounded-xl sm:rounded-2xl flex items-center justify-center text-xl sm:text-4xl font-extrabold text-white border-[3px] sm:border-4 border-[#061020] ring-2 ring-white/25 shadow-2xl"
                     style={{ backgroundColor: selectedMember.avatarColor }}
                   >
                     {selectedMember.avatarInitials}
@@ -826,16 +842,16 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                       type="button"
                       onClick={() => avatarUploadRef.current?.click()}
                       title="Update profile picture"
-                      className="absolute -bottom-2 -right-2 z-20 p-2.5 rounded-xl bg-[#FF6B00] text-white hover:bg-[#FF8533] shadow-lg transition-colors cursor-pointer border-2 border-[#061020]"
+                      className="absolute -bottom-1.5 -right-1.5 z-20 p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl bg-[#FF6B00] text-white hover:bg-[#FF8533] shadow-lg transition-colors cursor-pointer border-2 border-[#061020]"
                     >
-                      <Camera className="w-4 h-4" />
+                      <Camera className="w-3 h-3 sm:w-4 sm:h-4" />
                     </button>
                   </>
                 )}
               </div>
 
-              <div className="space-y-1.5 pt-1">
-                <div className="flex flex-wrap items-center gap-2 text-xs font-mono-tabular text-[#26E6DE]">
+              <div className="space-y-1 sm:space-y-1.5 pt-0.5 sm:pt-1">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-mono-tabular text-[#26E6DE]">
                   <span>{selectedMember.university}</span>
                   <span aria-hidden="true">·</span>
                   <span>{selectedMember.titleBadge}</span>
@@ -844,25 +860,25 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                   {renderRoleBadge(selectedMember.role)}
                   {renderDivisionBadge(selectedMember)}
                   {selectedMember.isDesignatedSuccessor && (
-                    <span className="px-2 py-0.5 rounded-md bg-amber-500/25 border border-amber-400/50 text-amber-300 font-mono-tabular text-[10px] font-bold uppercase">
-                      👑 Designated Next-Gen Heir
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/25 border border-amber-400/50 text-amber-300 font-mono-tabular text-[9px] sm:text-[10px] font-bold uppercase">
+                      👑 HEIR
                     </span>
                   )}
                   {selectedMember.bringsEquipment && (
-                    <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-mono-tabular text-[10px] font-bold uppercase">
-                      ♟️ Brings OTB Board/Clock
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-mono-tabular text-[9px] sm:text-[10px] font-bold uppercase">
+                      ♟️ Has Board
                     </span>
                   )}
                 </div>
 
-                <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white flex flex-wrap items-baseline gap-2.5">
+                <h3 className="text-lg sm:text-3xl font-extrabold tracking-tight text-white flex flex-wrap items-baseline gap-2">
                   <span>{selectedMember.name}</span>
-                  <span className="text-base font-normal text-slate-300">
+                  <span className="text-xs sm:text-base font-normal text-slate-300">
                     ({selectedMember.arabicName})
                   </span>
                 </h3>
 
-                <div className="text-xs sm:text-sm text-slate-300 flex flex-wrap items-center gap-2">
+                <div className="text-[11px] sm:text-sm text-slate-300 flex flex-wrap items-center gap-1.5 sm:gap-2">
                   <span>
                     {selectedMember.department} · {selectedMember.yearLevel}
                   </span>
@@ -874,62 +890,62 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                         href={cc.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-[#26E6DE]/15 hover:bg-[#26E6DE]/25 border border-[#26E6DE]/40 font-mono-tabular text-xs font-bold text-[#26E6DE] transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md sm:rounded-lg bg-[#26E6DE]/15 hover:bg-[#26E6DE]/25 border border-[#26E6DE]/40 font-mono-tabular text-[10px] sm:text-xs font-bold text-[#26E6DE] transition-colors"
                       >
-                        <span>Chess.com: @{cc.handle}</span>
-                        <ExternalLink className="w-3 h-3 shrink-0" />
+                        <span>@{cc.handle}</span>
+                        <ExternalLink className="w-2.5 h-2.5 sm:w-3 sm:h-3 shrink-0" />
                       </a>
                     );
                   })()}
                   {selectedMember.onlineEloBracket && (
-                    <span className="px-2 py-0.5 rounded bg-[#FF6B00]/15 font-mono-tabular text-xs text-[#FF6B00]">
-                      Form Rating: {selectedMember.onlineEloBracket}
+                    <span className="px-1.5 py-0.5 rounded bg-[#FF6B00]/15 font-mono-tabular text-[10px] sm:text-xs text-[#FF6B00]">
+                      {selectedMember.onlineEloBracket}
                     </span>
                   )}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
-                  <span className="px-2.5 py-1 rounded-lg bg-[#061020]/90 border border-white/15 text-slate-200">
-                    <strong className="text-[#26E6DE]">Club Role:</strong>{' '}
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-3 pt-0.5 text-[10px] sm:text-xs">
+                  <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg bg-[#061020]/90 border border-white/15 text-slate-200">
+                    <strong className="text-[#26E6DE]">Role:</strong>{' '}
                     {selectedMember.clubRoleDivision || 'Club Member'}
                   </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-[#061020]/90 border border-white/15 text-slate-200">
-                    <strong className="text-[#FF6B00]">Specialty:</strong>{' '}
-                    {selectedMember.chessSpecialty || 'Tactical & Rapid Player'}
+                  <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg bg-[#061020]/90 border border-white/15 text-slate-200">
+                    <strong className="text-[#FF6B00]">Style:</strong>{' '}
+                    {selectedMember.chessSpecialty || 'Tactical Player'}
                   </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-[#061020]/90 border border-white/15 text-slate-200">
-                    <strong className="text-emerald-400">Most Played Opening:</strong>{' '}
+                  <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg bg-[#061020]/90 border border-white/15 text-slate-200">
+                    <strong className="text-emerald-400">Opening:</strong>{' '}
                     {selectedMember.openings[0]?.name ||
                       selectedMember.signatureOpening ||
-                      'Pending — Determined after playing & uploading PGN games'}
+                      'Pending games'}
                   </span>
                 </div>
 
-                <p className="text-xs sm:text-sm text-slate-200 max-w-2xl pt-1 leading-relaxed">
+                <p className="text-[11px] sm:text-sm text-slate-200 max-w-2xl pt-0.5 leading-snug sm:leading-relaxed">
                   {selectedMember.bio}
                 </p>
               </div>
             </div>
 
-            <div className="flex flex-col sm:items-end gap-3 shrink-0 pointer-events-auto">
-              <div className="flex flex-col sm:items-end gap-1.5">
-                <span className="text-[11px] font-mono-tabular uppercase tracking-wider text-slate-300">
-                  Live Campus Availability Status
+            <div className="flex flex-col sm:items-end gap-2 sm:gap-3 shrink-0 pointer-events-auto">
+              <div className="flex flex-col sm:items-end gap-1">
+                <span className="text-[10px] sm:text-[11px] font-mono-tabular uppercase tracking-wider text-slate-300">
+                  Live Status
                 </span>
                 {canEditSelectedProfile ? (
-                  <div className="flex flex-wrap items-center gap-1.5 bg-[#061020] p-1.5 rounded-xl border border-white/15">
+                  <div className="flex flex-wrap items-center gap-1 bg-[#061020] p-1 rounded-lg sm:rounded-xl border border-white/15">
                     {(
                       [
-                        { id: 'campus_otb', label: 'On Campus OTB' },
-                        { id: 'online_ready', label: 'Online Ready' },
-                        { id: 'in_lecture', label: 'In Lecture' },
+                        { id: 'campus_otb', label: 'On Campus' },
+                        { id: 'online_ready', label: 'Online' },
+                        { id: 'in_lecture', label: 'In Class' },
                       ] as const
                     ).map((st) => (
                       <button
                         key={st.id}
                         type="button"
                         onClick={() => onUpdateMemberStatus(selectedMember.id, st.id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                        className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-md sm:rounded-lg text-[10px] sm:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                           selectedMember.liveStatus === st.id
                             ? 'bg-[#FF6B00] text-white'
                             : 'text-slate-300 hover:bg-white/10'
@@ -940,21 +956,21 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                     ))}
                   </div>
                 ) : (
-                  <div className="px-3.5 py-2 rounded-xl bg-[#061020]/90 border border-white/15 text-xs font-semibold text-[#26E6DE] flex items-center gap-2">
+                  <div className="px-2.5 py-1.5 rounded-lg sm:rounded-xl bg-[#061020]/90 border border-white/15 text-[11px] sm:text-xs font-semibold text-[#26E6DE] flex items-center gap-1.5">
                     <span>{renderStatusText(selectedMember.liveStatus)}</span>
                   </div>
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 {canEditSelectedProfile && (
                   <button
                     type="button"
                     onClick={() => setIsAddPhotoModalOpen(true)}
-                    className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#1E56A0] hover:bg-[#2563EB] text-white text-xs font-bold flex items-center gap-1.5 shadow-md cursor-pointer"
+                    className="min-h-[32px] sm:min-h-[42px] px-2.5 sm:px-3.5 py-1 sm:py-2 rounded-lg sm:rounded-xl bg-[#1E56A0] hover:bg-[#2563EB] text-white text-[11px] sm:text-xs font-bold flex items-center gap-1.5 shadow-md cursor-pointer"
                   >
-                    <ImagePlus className="w-4 h-4 text-[#26E6DE]" />
-                    + Add Photo to Profile
+                    <ImagePlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#26E6DE]" />
+                    <span>+ Photo</span>
                   </button>
                 )}
 
@@ -962,22 +978,20 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                   <button
                     type="button"
                     onClick={() => onOpenPrivateChat(selectedMember.id)}
-                    className="min-h-[42px] px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-[#26E6DE]/40 text-[#26E6DE] text-xs font-bold flex items-center gap-1.5 shadow-md cursor-pointer"
+                    className="min-h-[32px] sm:min-h-[42px] px-2.5 sm:px-3.5 py-1 sm:py-2 rounded-lg sm:rounded-xl bg-white/10 hover:bg-white/15 border border-[#26E6DE]/40 text-[#26E6DE] text-[11px] sm:text-xs font-bold flex items-center gap-1.5 shadow-md cursor-pointer"
                   >
-                    <MessageSquare className="w-4 h-4" />
-                    Message / Challenge
+                    <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <span>Message</span>
                   </button>
                 )}
 
                 <button
                   type="button"
                   onClick={handleOpenUploadModal}
-                  className="min-h-[42px] px-4 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-[#FF6B00]/25 cursor-pointer"
+                  className="min-h-[32px] sm:min-h-[42px] px-3 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl bg-[#FF6B00] hover:bg-[#FF8533] text-white text-[11px] sm:text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-[#FF6B00]/25 cursor-pointer"
                 >
-                  <Upload className="w-4 h-4" />
-                  {isAdminOrOwner
-                    ? `Record Match / Upload for ${selectedMember.name.split(' ')[0]}`
-                    : 'Record Match (Result Only or PGN)'}
+                  <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  <span>Record Match</span>
                 </button>
               </div>
             </div>
@@ -985,7 +999,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
         </div>
 
         {/* UNIFIED ELO CARDS (RAPID, BLITZ, CLASSICAL) + ROLE/OPENING EDITOR + PHOTO WALL + TRAJECTORY & ARCHIVE */}
-        <div className="p-4 sm:p-8 space-y-8">
+        <div className="p-3 sm:p-8 space-y-5 sm:space-y-8">
           {/* Interactive Role (IT / COMM / Coaching / Events), Specialty & Opening Editor */}
           {canEditSelectedProfile && onUpdateMemberRoleAndChessProfile && (
             <div className="p-4 sm:p-5 rounded-2xl bg-[#061020]/90 border border-[#26E6DE]/35 space-y-3">
@@ -1084,44 +1098,44 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
               </div>
             </div>
           )}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="p-5 rounded-2xl bg-[#061020]/80 border border-[#FF6B00]/40 space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-mono-tabular text-slate-400">
-                <span>RAPID ELO (10+0 / 15+10)</span>
-                <Clock className="w-4 h-4 text-[#FF6B00]" />
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <div className="p-2.5 sm:p-5 rounded-xl sm:rounded-2xl bg-[#061020]/80 border border-[#FF6B00]/40 space-y-0.5 sm:space-y-1.5">
+              <div className="flex items-center justify-between text-[9px] sm:text-xs font-mono-tabular text-slate-400">
+                <span>RAPID</span>
+                <Clock className="w-3 h-3 sm:w-4 sm:h-4 text-[#FF6B00]" />
               </div>
-              <div className="text-3xl font-extrabold font-mono-tabular text-white">
+              <div className="text-lg sm:text-3xl font-extrabold font-mono-tabular text-white">
                 {selectedMember.fide.rapid}
               </div>
-              <div className="text-xs font-mono-tabular text-emerald-400">
-                30d Delta: {selectedMember.fide.delta30d >= 0 ? '+' : ''}
-                {selectedMember.fide.delta30d} Elo · Peak {selectedMember.fide.peak}
+              <div className="text-[9px] sm:text-xs font-mono-tabular text-emerald-400 truncate">
+                {selectedMember.fide.delta30d >= 0 ? '+' : ''}
+                {selectedMember.fide.delta30d} · Peak {selectedMember.fide.peak}
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-[#061020]/80 border border-[#26E6DE]/35 space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-mono-tabular text-slate-400">
-                <span>BLITZ ELO (3+2 / 5+0)</span>
-                <Clock className="w-4 h-4 text-[#26E6DE]" />
+            <div className="p-2.5 sm:p-5 rounded-xl sm:rounded-2xl bg-[#061020]/80 border border-[#26E6DE]/35 space-y-0.5 sm:space-y-1.5">
+              <div className="flex items-center justify-between text-[9px] sm:text-xs font-mono-tabular text-slate-400">
+                <span>BLITZ</span>
+                <Clock className="w-3 h-3 sm:w-4 sm:h-4 text-[#26E6DE]" />
               </div>
-              <div className="text-3xl font-extrabold font-mono-tabular text-[#26E6DE]">
+              <div className="text-lg sm:text-3xl font-extrabold font-mono-tabular text-[#26E6DE]">
                 {selectedMember.fide.blitz}
               </div>
-              <div className="text-xs font-mono-tabular text-slate-400">
-                Official Club Blitz Rating
+              <div className="text-[9px] sm:text-xs font-mono-tabular text-slate-400 truncate">
+                Club Blitz
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-[#061020]/80 border border-white/15 space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-mono-tabular text-slate-400">
-                <span>CLASSICAL ELO (OTB 60m+)</span>
-                <Shield className="w-4 h-4 text-slate-300" />
+            <div className="p-2.5 sm:p-5 rounded-xl sm:rounded-2xl bg-[#061020]/80 border border-white/15 space-y-0.5 sm:space-y-1.5">
+              <div className="flex items-center justify-between text-[9px] sm:text-xs font-mono-tabular text-slate-400">
+                <span>CLASSICAL</span>
+                <Shield className="w-3 h-3 sm:w-4 sm:h-4 text-slate-300" />
               </div>
-              <div className="text-3xl font-extrabold font-mono-tabular text-white">
+              <div className="text-lg sm:text-3xl font-extrabold font-mono-tabular text-white">
                 {selectedMember.fide.classical}
               </div>
-              <div className="text-xs font-mono-tabular text-slate-400">
-                {selectedMember.fide.gamesPlayed} Total Rated Games
+              <div className="text-[9px] sm:text-xs font-mono-tabular text-slate-400 truncate">
+                {selectedMember.fide.gamesPlayed} Games
               </div>
             </div>
           </div>
