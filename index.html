@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function () {
+        try {
+          var currentFetch = window.fetch ? window.fetch.bind(window) : undefined;
+          var desc =
+            Object.getOwnPropertyDescriptor(window, 'fetch') ||
+            Object.getOwnPropertyDescriptor(Window.prototype, 'fetch');
+          if (desc && desc.configurable !== false) {
+            Object.defineProperty(window, 'fetch', {
+              configurable: true,
+              enumerable: true,
+              get: function () {
+                return currentFetch;
+              },
+              set: function (nextFetch) {
+                if (typeof nextFetch === 'function') {
+                  currentFetch = nextFetch;
+                }
+              },
+            });
+          }
+        } catch (_e) {
+          // Ignore if non-configurable
+        }
+
+        window.addEventListener(
+          'error',
+          function (event) {
+            var msg = event && event.message ? String(event.message) : '';
+            var file = event && event.filename ? String(event.filename) : '';
+            if (
+              msg.indexOf('Cannot set property fetch') !== -1 ||
+              file.indexOf('chrome-extension://') === 0
+            ) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              return false;
+            }
+          },
+          true
+        );
+
+        window.addEventListener(
+          'unhandledrejection',
+          function (event) {
+            var reasonStr = event && event.reason ? String(event.reason) : '';
+            if (reasonStr.indexOf('Cannot set property fetch') !== -1) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ENP Chess Hub — Multi-Club University Chess Platform</title>
+    <meta name="description" content="Flagship collegiate chess platform for École Nationale Polytechnique (ENP Alger — نادي الشطرنج) featuring Mikhail Tal Brilliant broadcast showcase, dual FIDE Elo & Glicko-2 ratings from 1500, Swiss/Knockout/Round-Robin/Arena tournaments, and campus free-hour matchmaking." />
+    <meta property="og:title" content="ENP Chess Hub — Multi-Club University Chess Platform" />
+    <meta property="og:description" content="Flagship collegiate chess platform for École Nationale Polytechnique (ENP Alger — نادي الشطرنج) featuring Mikhail Tal Brilliant broadcast showcase, dual FIDE Elo & Glicko-2 ratings from 1500, Swiss/Knockout/Round-Robin/Arena tournaments, and campus free-hour matchmaking." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;1,9..144,600&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  </head>
+  <body class="bg-[#F4F7FB] text-[#0A1E3C] antialiased selection:bg-[#FF6B00] selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

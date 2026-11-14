@@ -1,0 +1,305 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root,
+html[data-theme="dark"] {
+  --brand-primary: #061020;
+  --brand-secondary: #0D2240;
+  --brand-interactive: #1E56A0;
+  --brand-accent: #FF6B00;
+  --brand-accent-hover: #FF8533;
+  --brilliant-cyan: #26E6DE;
+  --brilliant-teal: #1BACA6;
+  --surface-canvas: #061020;
+  --surface-card: rgba(11, 28, 54, 0.78);
+  --surface-card-inner: rgba(6, 16, 32, 0.82);
+  --surface-header: rgba(6, 16, 32, 0.92);
+  --surface-sidebar: rgba(5, 13, 26, 0.92);
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+  --border-engineering: rgba(38, 230, 222, 0.14);
+  --border-subtle: rgba(255, 255, 255, 0.10);
+}
+
+html[data-theme="light"] {
+  --brand-primary: #F1F5F9;
+  --brand-secondary: #FFFFFF;
+  --brand-interactive: #1E56A0;
+  --brand-accent: #EA580C;
+  --brand-accent-hover: #F97316;
+  --brilliant-cyan: #0369A1;
+  --brilliant-teal: #0F766E;
+  --surface-canvas: #EEF3F9;
+  --surface-card: rgba(255, 255, 255, 0.95);
+  --surface-card-inner: #F8FAFC;
+  --surface-header: rgba(255, 255, 255, 0.94);
+  --surface-sidebar: #FFFFFF;
+  --text-primary: #0F172A;
+  --text-secondary: #334155;
+  --text-muted: #64748B;
+  --border-engineering: rgba(30, 86, 160, 0.18);
+  --border-subtle: rgba(15, 23, 42, 0.12);
+}
+
+html[data-theme="basic"] {
+  --brand-primary: #14171F;
+  --brand-secondary: #1D212B;
+  --brand-interactive: #3B82F6;
+  --brand-accent: #F59E0B;
+  --brand-accent-hover: #FBBF24;
+  --brilliant-cyan: #38BDF8;
+  --brilliant-teal: #2DD4BF;
+  --surface-canvas: #14171F;
+  --surface-card: #1D212B;
+  --surface-card-inner: #151821;
+  --surface-header: #181C24;
+  --surface-sidebar: #161922;
+  --text-primary: #F3F4F6;
+  --text-secondary: #D1D5DB;
+  --text-muted: #9CA3AF;
+  --border-engineering: rgba(255, 255, 255, 0.10);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="emerald"] {
+  --brand-primary: #091914;
+  --brand-secondary: #112921;
+  --brand-interactive: #15803D;
+  --brand-accent: #D97706;
+  --brand-accent-hover: #F59E0B;
+  --brilliant-cyan: #34D399;
+  --brilliant-teal: #10B981;
+  --surface-canvas: #091914;
+  --surface-card: rgba(17, 41, 33, 0.85);
+  --surface-card-inner: rgba(9, 25, 20, 0.85);
+  --surface-header: rgba(9, 25, 20, 0.94);
+  --surface-sidebar: rgba(7, 20, 16, 0.94);
+  --text-primary: #F8FAFC;
+  --text-secondary: #D1FAE5;
+  --text-muted: #A7F3D0;
+  --border-engineering: rgba(52, 211, 153, 0.18);
+  --border-subtle: rgba(255, 255, 255, 0.10);
+}
+
+/* Prevent any horizontal overflow across the viewport */
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Custom Ultra-Sleek Polytechnic Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(30, 86, 160, 0.7) rgba(4, 11, 22, 0.85);
+}
+
+html[data-theme="light"] * {
+  scrollbar-color: rgba(30, 86, 160, 0.45) rgba(226, 232, 240, 0.9);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(4, 11, 22, 0.9);
+  border-radius: 9999px;
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-track {
+  background: #E2E8F0;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(30, 86, 160, 0.85) 0%, rgba(27, 172, 166, 0.7) 100%);
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #FF6B00 0%, #26E6DE 100%);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Hide scrollbars on horizontal pill/tab strips while preserving touch scroll */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--surface-canvas);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.theme-app-shell {
+  background-color: var(--surface-canvas);
+  color: var(--text-primary);
+}
+
+html[data-theme="dark"] .theme-app-shell {
+  background-image:
+    radial-gradient(circle at 75% 12%, rgba(38, 230, 222, 0.10) 0%, transparent 45%),
+    radial-gradient(circle at 20% 35%, rgba(255, 107, 0, 0.07) 0%, transparent 50%),
+    linear-gradient(180deg, #061020 0%, #08172E 50%, #050D1A 100%);
+}
+
+html[data-theme="light"] .theme-app-shell {
+  background-image:
+    radial-gradient(circle at 75% 10%, rgba(30, 86, 160, 0.07) 0%, transparent 45%),
+    radial-gradient(circle at 20% 35%, rgba(255, 107, 0, 0.05) 0%, transparent 50%),
+    linear-gradient(180deg, #F1F5F9 0%, #E8EFF8 50%, #F8FAFC 100%);
+}
+
+html[data-theme="basic"] .theme-app-shell {
+  background-image: none;
+  background-color: #14171F;
+}
+
+html[data-theme="emerald"] .theme-app-shell {
+  background-image:
+    radial-gradient(circle at 75% 12%, rgba(52, 211, 153, 0.10) 0%, transparent 45%),
+    radial-gradient(circle at 20% 35%, rgba(217, 119, 6, 0.08) 0%, transparent 50%),
+    linear-gradient(180deg, #091914 0%, #0D241C 50%, #07140F 100%);
+}
+
+.font-serif-editorial {
+  font-family: 'Fraunces', Georgia, serif;
+}
+
+.font-mono-tabular {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.cad-grid-dark {
+  background-image:
+    linear-gradient(to right, rgba(38, 230, 222, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(38, 230, 222, 0.045) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+html[data-theme="light"] .cad-grid-dark {
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+html[data-theme="basic"] .cad-grid-dark {
+  background-image: none;
+}
+
+.broadcast-panel {
+  background: var(--surface-card);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--border-subtle);
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+html[data-theme="light"] .broadcast-panel {
+  box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.07);
+}
+
+.broadcast-panel-subtle {
+  background: var(--surface-card-inner);
+  border: 1px solid var(--border-engineering);
+}
+
+/* Light-mode scoped surface & typography adaptation (excluding photographic hero overlays) */
+html[data-theme="light"] .theme-header-surface {
+  background-color: rgba(255, 255, 255, 0.94);
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #0F172A;
+}
+
+html[data-theme="light"] .theme-sidebar-surface {
+  background-color: rgba(255, 255, 255, 0.96);
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #0F172A;
+}
+
+html[data-theme="light"] .broadcast-panel h2,
+html[data-theme="light"] .broadcast-panel h3,
+html[data-theme="light"] .broadcast-panel h4,
+html[data-theme="light"] .theme-sidebar-surface .theme-heading,
+html[data-theme="light"] .theme-header-surface .theme-heading {
+  color: #0F172A;
+}
+
+html[data-theme="light"] .broadcast-panel .text-white:not(button *):not(button),
+html[data-theme="light"] .theme-sidebar-surface .text-white:not(button *):not(button) {
+  color: #0F172A;
+}
+
+html[data-theme="light"] .broadcast-panel .text-slate-200,
+html[data-theme="light"] .broadcast-panel .text-slate-300,
+html[data-theme="light"] .theme-sidebar-surface .text-slate-300,
+html[data-theme="light"] .theme-header-surface .text-slate-300 {
+  color: #334155;
+}
+
+html[data-theme="light"] .broadcast-panel .text-slate-400,
+html[data-theme="light"] .theme-sidebar-surface .text-slate-400 {
+  color: #475569;
+}
+
+html[data-theme="light"] .broadcast-panel .text-\[\#26E6DE\],
+html[data-theme="light"] .theme-sidebar-surface .text-\[\#26E6DE\],
+html[data-theme="light"] .theme-header-surface .text-\[\#26E6DE\] {
+  color: #0369A1;
+}
+
+html[data-theme="light"] .broadcast-panel select,
+html[data-theme="light"] .broadcast-panel input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+html[data-theme="light"] .broadcast-panel textarea,
+html[data-theme="light"] .theme-sidebar-surface select {
+  background-color: #F8FAFC;
+  color: #0F172A;
+  border-color: rgba(15, 23, 42, 0.2);
+}
+
+html[data-theme="light"] .broadcast-panel article,
+html[data-theme="light"] .broadcast-panel .bg-\[\#061020\]\/80,
+html[data-theme="light"] .broadcast-panel .bg-\[\#061020\]\/75,
+html[data-theme="light"] .broadcast-panel .bg-\[\#061020\]\/70,
+html[data-theme="light"] .broadcast-panel .bg-\[\#061020\]\/90,
+html[data-theme="light"] .broadcast-panel .bg-\[\#040B16\]\/80,
+html[data-theme="light"] .broadcast-panel .bg-\[\#040B16\]\/75,
+html[data-theme="light"] .broadcast-panel .bg-\[\#040B16\]\/60 {
+  background-color: #F1F5F9;
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+/* Seamless Banner & Logo Theme Integration */
+.club-emblem-dark-frame {
+  background: radial-gradient(circle at 50% 50%, #0D2852 0%, #071630 100%);
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45), inset 0 0 12px rgba(38, 230, 222, 0.12);
+}
+
+.school-logo-dark-blend {
+  filter: brightness(0) invert(1) drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+}
+
+.banner-theme-vignette {
+  background:
+    radial-gradient(circle at 80% 30%, rgba(30, 86, 160, 0.22) 0%, rgba(6, 16, 32, 0.72) 70%),
+    linear-gradient(90deg, rgba(6, 16, 32, 0.95) 0%, rgba(6, 16, 32, 0.68) 48%, rgba(6, 16, 32, 0.35) 100%),
+    linear-gradient(180deg, rgba(6, 16, 32, 0.25) 0%, rgba(6, 16, 32, 0.6) 68%, #061020 100%);
+}

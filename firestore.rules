@@ -1,0 +1,206 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner() {
+      return isSignedIn() && (
+        request.auth.token.email == 'fethallah2411@gmail.com' ||
+        (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'owner')
+      );
+    }
+
+    function isAdmin() {
+      return isOwner() || (
+        isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function clubExists(clubId) {
+      return exists(/databases/$(database)/documents/clubs/$(clubId));
+    }
+
+    // Validation Blueprints
+    function isValidAdminDoc(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'name']) &&
+        data.uid is string && data.uid.size() <= 128 &&
+        data.email is string && data.email.size() <= 160 &&
+        data.role in ['owner', 'admin'];
+    }
+
+    function isValidClub(data, clubId) {
+      return data.keys().hasAll(['clubId', 'clubName', 'universityName', 'primaryColor', 'accentColor', 'startingRating', 'weekMode']) &&
+        data.keys().hasOnly(['clubId', 'clubName', 'subtitleAr', 'universityName', 'city', 'primaryColor', 'secondaryColor', 'accentColor', 'customLogoUrl', 'schoolLogoUrl', 'clubBannerUrl', 'customHeroUrl', 'startingRating', 'weekMode', 'createdByUid']) &&
+        data.clubId == clubId &&
+        data.clubName is string && data.clubName.size() >= 2 && data.clubName.size() <= 100 &&
+        data.universityName is string && data.universityName.size() >= 2 && data.universityName.size() <= 140 &&
+        data.primaryColor is string && data.primaryColor.size() <= 20 &&
+        data.accentColor is string && data.accentColor.size() <= 20 &&
+        data.startingRating is int && data.startingRating >= 800 && data.startingRating <= 2500 &&
+        data.weekMode in ['algeria_sat_thu', 'intl_mon_sat'];
+    }
+
+    function isValidMember(data, clubId, memberId) {
+      return data.keys().hasAll(['id', 'clubId', 'name', 'role', 'eloRapid', 'eloBlitz', 'eloClassical']) &&
+        data.keys().hasOnly(['id', 'clubId', 'name', 'arabicName', 'username', 'passwordCode', 'role', 'university', 'department', 'yearLevel', 'titleBadge', 'liveStatus', 'bio', 'avatarUrl', 'avatarInitials', 'avatarColor', 'joinedDate', 'eloRapid', 'eloBlitz', 'eloClassical', 'peakElo', 'delta30d', 'gamesPlayed', 'freeSlots']) &&
+        data.id == memberId &&
+        data.clubId == clubId &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+        data.role in ['owner', 'admin', 'member'] &&
+        data.eloRapid is int && data.eloRapid >= 400 && data.eloRapid <= 3500 &&
+        data.eloBlitz is int && data.eloBlitz >= 400 && data.eloBlitz <= 3500 &&
+        data.eloClassical is int && data.eloClassical >= 400 && data.eloClassical <= 3500;
+    }
+
+    function isValidClubGame(data, clubId, gameId) {
+      return data.keys().hasAll(['id', 'clubId', 'whiteId', 'blackId', 'result', 'timeControl', 'pgn', 'status']) &&
+        data.keys().hasOnly(['id', 'clubId', 'title', 'event', 'date', 'whiteId', 'blackId', 'result', 'timeControl', 'matchStakes', 'eco', 'openingName', 'pgn', 'status', 'submittedBy', 'whiteEloDelta', 'blackEloDelta', 'tournamentId', 'moves']) &&
+        data.id == gameId &&
+        data.clubId == clubId &&
+        data.whiteId is string && data.whiteId.size() <= 128 &&
+        data.blackId is string && data.blackId.size() <= 128 &&
+        data.result in ['1-0', '1/2-1/2', '0-1'] &&
+        data.timeControl in ['rapid', 'blitz', 'classical'] &&
+        (!('matchStakes' in data) || data.matchStakes in ['friendly', 'competitive', 'tournament']) &&
+        data.pgn is string && data.pgn.size() <= 10000 &&
+        data.status in ['approved', 'pending'];
+    }
+
+    function isValidClubPost(data, clubId, postId) {
+      return data.keys().hasAll(['id', 'clubId', 'title', 'category', 'body', 'authorName', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'clubId', 'title', 'category', 'body', 'authorName', 'authorRole', 'createdAt', 'pinned']) &&
+        data.id == postId &&
+        data.clubId == clubId &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 160 &&
+        data.category is string && data.category.size() <= 60 &&
+        data.body is string && data.body.size() >= 2 && data.body.size() <= 4000 &&
+        data.authorName is string && data.authorName.size() <= 100 &&
+        data.createdAt is string && data.createdAt.size() <= 60;
+    }
+
+    function isValidTournament(data, clubId, tournamentId) {
+      return data.keys().hasAll(['id', 'clubId', 'name', 'format', 'timeControl', 'status']) &&
+        data.keys().hasOnly(['id', 'clubId', 'name', 'format', 'timeControl', 'status', 'currentRound', 'totalRounds', 'playerIds', 'matches', 'matchesJson', 'createdAt']) &&
+        data.id == tournamentId &&
+        data.clubId == clubId &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 140 &&
+        data.format in ['swiss', 'knockout', 'double_elimination', 'round_robin', 'double_round_robin', 'scheveningen', 'arena'] &&
+        data.timeControl in ['rapid', 'blitz', 'classical'] &&
+        data.status in ['active', 'completed'];
+    }
+
+    function isValidChatMessage(data, clubId, messageId) {
+      return data.keys().hasAll(['id', 'clubId', 'channelId', 'channelType', 'senderId', 'senderName', 'body', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'clubId', 'channelId', 'channelType', 'senderId', 'senderName', 'senderRole', 'senderAvatarColor', 'senderInitials', 'recipientId', 'body', 'challengeMeta', 'createdAt']) &&
+        data.id == messageId &&
+        data.clubId == clubId &&
+        data.channelId is string && data.channelId.size() >= 1 && data.channelId.size() <= 128 &&
+        data.channelType in ['team', 'private'] &&
+        data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+        data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100 &&
+        data.body is string && data.body.size() >= 1 && data.body.size() <= 2000 &&
+        data.createdAt is string && data.createdAt.size() <= 60;
+    }
+
+    // 1. Admins Registry (Only Owner can grant/revoke admin documents)
+    match /admins/{adminUid} {
+      allow get: if isValidId(adminUid) && (isOwner() || (isSignedIn() && request.auth.uid == adminUid));
+      allow list: if isOwner() && resource.data.role in ['owner', 'admin'];
+      allow create, update: if isValidId(adminUid) && isOwner() && isValidAdminDoc(incoming());
+      allow delete: if isValidId(adminUid) && isOwner();
+    }
+
+    // 2. University Clubs (Public showcase read; Admins can create/update; ONLY Owner can delete)
+    match /clubs/{clubId} {
+      allow get: if isValidId(clubId);
+      allow list: if resource.data.startingRating >= 800;
+      allow create: if isValidId(clubId) && isAdmin() && isValidClub(incoming(), clubId);
+      allow update: if isValidId(clubId) && isValidClub(incoming(), clubId) && isAdmin();
+      allow delete: if isValidId(clubId) && isOwner();
+    }
+
+    // 3. Club-Scoped Members
+    match /clubs/{clubId}/members/{memberId} {
+      allow get: if isValidId(clubId) && isValidId(memberId);
+      allow list: if resource.data.clubId == clubId;
+      allow create: if isValidId(clubId) && isValidId(memberId) && isAdmin() && isValidMember(incoming(), clubId, memberId) && clubExists(clubId);
+      allow update: if isValidId(clubId) && isValidId(memberId) && isValidMember(incoming(), clubId, memberId) && (
+        isAdmin() ||
+        (isSignedIn() && request.auth.uid == memberId && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['bio', 'liveStatus', 'freeSlots', 'avatarUrl']))
+      );
+      allow delete: if isValidId(clubId) && isValidId(memberId) && isAdmin();
+    }
+
+    // 4. Club-Scoped Games (Members can submit 'pending'; Admins can create/approve 'approved')
+    match /clubs/{clubId}/games/{gameId} {
+      allow get: if isValidId(clubId) && isValidId(gameId);
+      allow list: if resource.data.clubId == clubId;
+      allow create: if isValidId(clubId) && isValidId(gameId) && isValidClubGame(incoming(), clubId, gameId) && clubExists(clubId) && (
+        isAdmin() ||
+        (isSignedIn() && incoming().status == 'pending' && incoming().submittedBy == request.auth.uid)
+      );
+      allow update: if isValidId(clubId) && isValidId(gameId) && isValidClubGame(incoming(), clubId, gameId) && isAdmin();
+      allow delete: if isValidId(clubId) && isValidId(gameId) && isAdmin();
+    }
+
+    // 5. Club-Scoped Home Screen Posts (Public read; Admin write)
+    match /clubs/{clubId}/posts/{postId} {
+      allow get: if isValidId(clubId) && isValidId(postId);
+      allow list: if resource.data.clubId == clubId;
+      allow create: if isValidId(clubId) && isValidId(postId) && isAdmin() && isValidClubPost(incoming(), clubId, postId) && clubExists(clubId);
+      allow update: if isValidId(clubId) && isValidId(postId) && isValidClubPost(incoming(), clubId, postId) && isAdmin();
+      allow delete: if isValidId(clubId) && isValidId(postId) && isAdmin();
+    }
+
+    // 6. Club-Scoped Tournaments (Public read; Admin write)
+    match /clubs/{clubId}/tournaments/{tournamentId} {
+      allow get: if isValidId(clubId) && isValidId(tournamentId);
+      allow list: if resource.data.clubId == clubId;
+      allow create: if isValidId(clubId) && isValidId(tournamentId) && isAdmin() && isValidTournament(incoming(), clubId, tournamentId) && clubExists(clubId);
+      allow update: if isValidId(clubId) && isValidId(tournamentId) && isValidTournament(incoming(), clubId, tournamentId) && isAdmin();
+      allow delete: if isValidId(clubId) && isValidId(tournamentId) && isAdmin();
+    }
+
+    // 7. Club-Scoped Teams & Private Chat Messages
+    match /clubs/{clubId}/messages/{messageId} {
+      allow get: if isValidId(clubId) && isValidId(messageId) && (
+        resource.data.channelType == 'team' ||
+        isAdmin() ||
+        (isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid))
+      );
+      allow list: if resource.data.clubId == clubId && (
+        resource.data.channelType == 'team' ||
+        isAdmin() ||
+        (isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid))
+      );
+      allow create: if isValidId(clubId) && isValidId(messageId) && isSignedIn() && isValidChatMessage(incoming(), clubId, messageId) && clubExists(clubId) && (
+        isAdmin() || incoming().senderId == request.auth.uid
+      );
+      allow delete: if isValidId(clubId) && isValidId(messageId) && (
+        isAdmin() || (isSignedIn() && resource.data.senderId == request.auth.uid)
+      );
+    }
+  }
+}

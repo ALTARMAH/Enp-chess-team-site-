@@ -1,0 +1,166 @@
+{
+  "entities": {
+    "Club": {
+      "title": "Club",
+      "description": "University chess club configuration and branding.",
+      "type": "object",
+      "properties": {
+        "clubId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "subtitleAr": { "type": "string", "maxLength": 160 },
+        "universityName": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "city": { "type": "string", "maxLength": 100 },
+        "primaryColor": { "type": "string", "maxLength": 20 },
+        "secondaryColor": { "type": "string", "maxLength": 20 },
+        "accentColor": { "type": "string", "maxLength": 20 },
+        "customLogoUrl": { "type": "string", "maxLength": 2048 },
+        "schoolLogoUrl": { "type": "string", "maxLength": 2048 },
+        "clubBannerUrl": { "type": "string", "maxLength": 2048 },
+        "customHeroUrl": { "type": "string", "maxLength": 2048 },
+        "startingRating": { "type": "number" },
+        "weekMode": { "type": "string", "enum": ["algeria_sat_thu", "intl_mon_sat"] },
+        "createdByUid": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["clubId", "clubName", "universityName", "primaryColor", "accentColor", "startingRating", "weekMode"]
+    },
+    "Member": {
+      "title": "Member",
+      "description": "Club player profile with unified Rapid, Blitz, and Classical Elo ratings and club-scoped availability.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "arabicName": { "type": "string", "maxLength": 100 },
+        "username": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "passwordCode": { "type": "string", "maxLength": 64 },
+        "role": { "type": "string", "enum": ["owner", "admin", "member"] },
+        "university": { "type": "string", "maxLength": 120 },
+        "department": { "type": "string", "maxLength": 120 },
+        "yearLevel": { "type": "string", "maxLength": 80 },
+        "titleBadge": { "type": "string", "maxLength": 80 },
+        "liveStatus": { "type": "string", "enum": ["campus_otb", "online_ready", "in_lecture"] },
+        "bio": { "type": "string", "maxLength": 600 },
+        "avatarInitials": { "type": "string", "maxLength": 8 },
+        "avatarColor": { "type": "string", "maxLength": 24 },
+        "joinedDate": { "type": "string", "maxLength": 40 },
+        "eloRapid": { "type": "number" },
+        "eloBlitz": { "type": "number" },
+        "eloClassical": { "type": "number" },
+        "peakElo": { "type": "number" },
+        "delta30d": { "type": "number" },
+        "gamesPlayed": { "type": "number" }
+      },
+      "required": ["id", "clubId", "name", "role", "eloRapid", "eloBlitz", "eloClassical"]
+    },
+    "ClubGame": {
+      "title": "ClubGame",
+      "description": "Verified or pending chess match between two club members (with optional PGN or result-only logging) and Friendly/Competitive Elo stakes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 180 },
+        "event": { "type": "string", "maxLength": 140 },
+        "date": { "type": "string", "maxLength": 40 },
+        "whiteId": { "type": "string", "maxLength": 128 },
+        "blackId": { "type": "string", "maxLength": 128 },
+        "result": { "type": "string", "enum": ["1-0", "1/2-1/2", "0-1"] },
+        "timeControl": { "type": "string", "enum": ["rapid", "blitz", "classical"] },
+        "matchStakes": { "type": "string", "enum": ["friendly", "competitive", "tournament"] },
+        "openingName": { "type": "string", "maxLength": 140 },
+        "pgn": { "type": "string", "maxLength": 10000 },
+        "status": { "type": "string", "enum": ["approved", "pending"] },
+        "submittedBy": { "type": "string", "maxLength": 128 },
+        "whiteEloDelta": { "type": "number" },
+        "blackEloDelta": { "type": "number" }
+      },
+      "required": ["id", "clubId", "whiteId", "blackId", "result", "timeControl", "pgn", "status"]
+    },
+    "ClubPost": {
+      "title": "ClubPost",
+      "description": "Home screen news announcement or tournament recap created by club admins.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "category": { "type": "string", "maxLength": 60 },
+        "body": { "type": "string", "minLength": 2, "maxLength": 4000 },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "authorRole": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "maxLength": 60 },
+        "pinned": { "type": "boolean" }
+      },
+      "required": ["id", "clubId", "title", "category", "body", "authorName", "createdAt"]
+    },
+    "Tournament": {
+      "title": "Tournament",
+      "description": "Computer-paired club tournament across 7 formats.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "format": {
+          "type": "string",
+          "enum": ["swiss", "knockout", "double_elimination", "round_robin", "double_round_robin", "scheveningen", "arena"]
+        },
+        "timeControl": { "type": "string", "enum": ["rapid", "blitz", "classical"] },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "currentRound": { "type": "number" },
+        "totalRounds": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 60 }
+      },
+      "required": ["id", "clubId", "name", "format", "timeControl", "status"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Internal club team channel or 1-on-1 private direct message.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubId": { "type": "string", "maxLength": 64 },
+        "channelId": { "type": "string", "maxLength": 128 },
+        "channelType": { "type": "string", "enum": ["team", "private"] },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 100 },
+        "senderRole": { "type": "string", "enum": ["owner", "admin", "member"] },
+        "recipientId": { "type": "string", "maxLength": 128 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "createdAt": { "type": "string", "maxLength": 60 }
+      },
+      "required": ["id", "clubId", "channelId", "channelType", "senderId", "senderName", "body", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminUid}": {
+      "schema": "Member",
+      "description": "Registry of platform admin and owner UIDs."
+    },
+    "/clubs/{clubId}": {
+      "schema": { "$ref": "#/entities/Club" },
+      "description": "University chess clubs."
+    },
+    "/clubs/{clubId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/Member" },
+      "description": "Club-scoped member profiles and Elo ratings."
+    },
+    "/clubs/{clubId}/games/{gameId}": {
+      "schema": { "$ref": "#/entities/ClubGame" },
+      "description": "Club-scoped PGN or result-only games (pending approval or approved)."
+    },
+    "/clubs/{clubId}/posts/{postId}": {
+      "schema": { "$ref": "#/entities/ClubPost" },
+      "description": "Club-scoped home screen announcements and news posts."
+    },
+    "/clubs/{clubId}/tournaments/{tournamentId}": {
+      "schema": { "$ref": "#/entities/Tournament" },
+      "description": "Club-scoped computer-paired tournaments."
+    },
+    "/clubs/{clubId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Club-scoped team channel and private direct messages."
+    }
+  }
+}
