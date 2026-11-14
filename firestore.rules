@@ -49,8 +49,14 @@ service cloud.firestore {
     function isMemberOwnedByCaller(clubId, memberId) {
       return isSignedIn() &&
         isValidId(memberId) &&
-        exists(/databases/$(database)/documents/clubs/$(clubId)/members/$(memberId)) &&
-        get(/databases/$(database)/documents/clubs/$(clubId)/members/$(memberId)).data.authUid == request.auth.uid;
+        exists(/databases/$(database)/documents/clubs/$(clubId)/members/$(memberId)) && (
+          get(/databases/$(database)/documents/clubs/$(clubId)/members/$(memberId)).data.authUid == request.auth.uid ||
+          (
+            'linkedAuthUids' in get(/databases/$(database)/documents/clubs/$(clubId)/members/$(memberId)).data &&
+            get(/databases/$(database)/documents/clubs/$(clubId)/members/$(memberId)).data.linkedAuthUids is list &&
+            request.auth.uid in get(/databases/$(database)/documents/clubs/$(clubId)/members/$(memberId)).data.linkedAuthUids
+          )
+        );
     }
 
     // Validation Blueprints
@@ -92,7 +98,7 @@ service cloud.firestore {
     function isValidMember(data, clubId, memberId) {
       return data.keys().hasAll(['id', 'clubId', 'name', 'username', 'role', 'liveStatus', 'fide', 'glicko2']) &&
         data.keys().hasOnly([
-          'id', 'clubId', 'authUid', 'name', 'arabicName', 'username', 'role',
+          'id', 'clubId', 'authUid', 'linkedAuthUids', 'name', 'arabicName', 'username', 'role',
           'clubRoleDivision', 'chessSpecialty', 'signatureOpening',
           'chessComUsername', 'onlineEloBracket', 'bringsEquipment',
           'willingToCoach', 'willingToOrganize', 'clubExpectation',
@@ -105,6 +111,11 @@ service cloud.firestore {
         data.id == memberId &&
         data.clubId == clubId &&
         (!('authUid' in data) || (data.authUid is string && data.authUid.size() <= 128)) &&
+        (!('linkedAuthUids' in data) || (
+          data.linkedAuthUids is list &&
+          data.linkedAuthUids.size() <= 10 &&
+          (data.linkedAuthUids.size() == 0 || (data.linkedAuthUids[0] is string && data.linkedAuthUids[0].size() <= 128))
+        )) &&
         data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
         (!('arabicName' in data) || (data.arabicName is string && data.arabicName.size() <= 100)) &&
         data.username is string && data.username.size() >= 2 && data.username.size() <= 64 &&
@@ -221,7 +232,7 @@ service cloud.firestore {
         (!('senderRole' in data) || data.senderRole in ['owner', 'admin', 'member']) &&
         (!('recipientId' in data) || (data.recipientId is string && data.recipientId.size() <= 128)) &&
         (!('recipientAuthUid' in data) || (data.recipientAuthUid is string && data.recipientAuthUid.size() <= 128)) &&
-        (!('participantAuthUids' in data) || (data.participantAuthUids is list && data.participantAuthUids.size() <= 4)) &&
+        (!('participantAuthUids' in data) || (data.participantAuthUids is list && data.participantAuthUids.size() <= 12)) &&
         data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
         (!('challengeTimeControl' in data) || data.challengeTimeControl in ['rapid', 'blitz', 'classical']) &&
         (!('challengeStakes' in data) || data.challengeStakes in ['friendly', 'competitive', 'tournament']) &&
@@ -276,14 +287,27 @@ service cloud.firestore {
       allow update: if isSignedIn() && isValidId(clubId) && isValidId(memberId) && isValidMember(incoming(), clubId, memberId) && incoming().id == existing().id && incoming().clubId == existing().clubId && (
         isAdmin() ||
         (
-          existing().authUid == request.auth.uid &&
+          (
+            existing().authUid == request.auth.uid ||
+            ('linkedAuthUids' in existing() && existing().linkedAuthUids is list && request.auth.uid in existing().linkedAuthUids)
+          ) &&
           incoming().role == existing().role &&
-          incoming().authUid == existing().authUid &&
+          (!('authUid' in existing()) || incoming().authUid == existing().authUid) &&
           incoming().diff(existing()).affectedKeys().hasOnly([
             'bio', 'liveStatus', 'freeSlots', 'avatarUrl', 'coverPhotoUrl',
             'profilePhotos', 'chessComUsername', 'chessSpecialty', 'signatureOpening',
             'bringsEquipment', 'willingToCoach', 'willingToOrganize',
             'campusMeetupZoneId', 'gpsLocation', 'updatedAt'
+          ])
+        ) ||
+        (
+          isVerifiedUser() &&
+          existing().role == 'member' &&
+          incoming().role == 'member' &&
+          (!('authUid' in existing()) || existing().authUid == '') &&
+          incoming().authUid == request.auth.uid &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'authUid', 'linkedAuthUids', 'liveStatus', 'avatarUrl', 'updatedAt'
           ])
         )
       );

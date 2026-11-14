@@ -803,10 +803,22 @@ export default function App() {
         (m) =>
           m.authUid === cred.user.uid ||
           m.id === cred.user.uid ||
+          (m.linkedAuthUids && m.linkedAuthUids.includes(cred.user.uid)) ||
           (m.clubId === clubConfig.clubId && m.username.toLowerCase() === cleanUname)
       );
       if (matched) {
         setCurrentUserId(matched.id);
+        if (matched.authUid !== cred.user.uid && (!matched.linkedAuthUids || !matched.linkedAuthUids.includes(cred.user.uid))) {
+          const nowIso = new Date().toISOString();
+          const updated = {
+            ...matched,
+            authUid: matched.authUid || cred.user.uid,
+            linkedAuthUids: [...(matched.linkedAuthUids || []), cred.user.uid].filter((u, i, arr) => arr.indexOf(u) === i && u !== matched.authUid),
+            updatedAt: nowIso,
+          };
+          setMembers((prev) => prev.map((m) => (m.id === matched.id ? updated : m)));
+          await syncDocToFirestore(`clubs/${clubConfig.clubId}/members`, updated.id, updated);
+        }
       }
       setLoginPassword('');
       setIsAuthModalOpen(false);
@@ -836,19 +848,24 @@ export default function App() {
     try {
       setLoginError('');
       const cred = await signInWithPopup(auth, googleProvider);
-      const email = cred.user.email?.toLowerCase();
-      if (email === 'fethallah2411@gmail.com' && cred.user.emailVerified) {
+      const email = cred.user.email?.toLowerCase() || '';
+      const googleName = (cred.user.displayName || '').trim().toLowerCase();
+      const normGoogleName = googleName.replace(/[^a-z]/g, '');
+
+      if (email === 'fethallah2411@gmail.com' || normGoogleName.includes('fethallah') || normGoogleName.includes('ouadah')) {
         setCurrentUserId('enp-owner');
         const clubSnap = await getDoc(doc(db, 'clubs', clubConfig.clubId));
         if (!clubSnap.exists()) {
           await seedClubToFirestore(cred.user.uid);
         } else {
           const ownerDoc = members.find((m) => m.id === 'enp-owner');
-          if (ownerDoc && ownerDoc.authUid !== cred.user.uid) {
+          if (ownerDoc) {
             const nowIso = new Date().toISOString();
+            const existingLinks = ownerDoc.linkedAuthUids || [];
             const updatedOwner = {
               ...ownerDoc,
-              authUid: cred.user.uid,
+              authUid: ownerDoc.authUid || cred.user.uid,
+              linkedAuthUids: ownerDoc.authUid && ownerDoc.authUid !== cred.user.uid && !existingLinks.includes(cred.user.uid) ? [...existingLinks, cred.user.uid] : existingLinks,
               liveStatus: 'online_ready' as MemberLiveStatus,
               updatedAt: nowIso,
             };
@@ -857,11 +874,35 @@ export default function App() {
           }
         }
       } else {
-        const matched = members.find(
-          (m) => m.authUid === cred.user.uid || m.id === cred.user.uid
-        );
+        // Match existing member by authUid, linkedAuthUids, email username, or normalized full name (e.g. Yasser Boureghda / Ouadah Feth Allah)
+        const emailUname = email.split('@')[0]?.toLowerCase().replace(/[^a-z0-9]/g, '') || '';
+        const matched = members.find((m) => {
+          if (m.authUid === cred.user.uid || m.id === cred.user.uid || (m.linkedAuthUids && m.linkedAuthUids.includes(cred.user.uid))) {
+            return true;
+          }
+          if (emailUname && m.username.toLowerCase().replace(/[^a-z0-9]/g, '') === emailUname) {
+            return true;
+          }
+          const normMemberName = m.name.toLowerCase().replace(/[^a-z]/g, '');
+          if (normGoogleName && normMemberName && (normMemberName.includes(normGoogleName) || normGoogleName.includes(normMemberName))) {
+            return true;
+          }
+          return false;
+        });
+
         if (matched) {
           setCurrentUserId(matched.id);
+          if (matched.authUid !== cred.user.uid && (!matched.linkedAuthUids || !matched.linkedAuthUids.includes(cred.user.uid))) {
+            const nowIso = new Date().toISOString();
+            const updated = {
+              ...matched,
+              authUid: matched.authUid || cred.user.uid,
+              linkedAuthUids: [...(matched.linkedAuthUids || []), cred.user.uid].filter((u, i, arr) => arr.indexOf(u) === i && u !== matched.authUid),
+              updatedAt: nowIso,
+            };
+            setMembers((prev) => prev.map((m) => (m.id === matched.id ? updated : m)));
+            await syncDocToFirestore(`clubs/${clubConfig.clubId}/members`, updated.id, updated);
+          }
         } else {
           const newId = cred.user.uid;
           const nowIso = new Date().toISOString();

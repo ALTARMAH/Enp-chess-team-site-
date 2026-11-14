@@ -171,6 +171,7 @@ export interface ClubMember {
   arabicName: string;
   username: string;
   authUid?: string;
+  linkedAuthUids?: string[];
   role: UserRole;
   /**
    * Club organizational division / role (IT, COMM, Coaching, Events, Logistics, Relex, etc.)
@@ -845,8 +846,8 @@ export const INITIAL_MEMBERS: ClubMember[] = [
   {
     id: 'enp-owner',
     clubId: 'enp-alger',
-    name: 'Fethallah (Club Founder)',
-    arabicName: 'فتح الله — مؤسس النادي',
+    name: 'OUADAH FETH ALLAH (Fethallah)',
+    arabicName: 'عواداح فتح الله — مؤسس النادي',
     username: 'fethallah',
     role: 'owner',
     clubRoleDivision: 'President & Founder',
