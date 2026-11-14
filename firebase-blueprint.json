@@ -61,7 +61,7 @@
         "department": { "type": "string", "maxLength": 120 },
         "yearLevel": { "type": "string", "maxLength": 80 },
         "titleBadge": { "type": "string", "maxLength": 100 },
-        "liveStatus": { "type": "string", "enum": ["campus_otb", "online_ready", "in_lecture"] },
+        "liveStatus": { "type": "string", "enum": ["campus_otb", "online_ready", "in_lecture", "offline"] },
         "bio": { "type": "string", "maxLength": 600 },
         "avatarUrl": { "type": "string", "maxLength": 200000 },
         "coverPhotoUrl": { "type": "string", "maxLength": 220000 },

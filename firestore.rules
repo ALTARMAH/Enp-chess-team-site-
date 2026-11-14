@@ -122,7 +122,7 @@ service cloud.firestore {
         (!('department' in data) || (data.department is string && data.department.size() <= 120)) &&
         (!('yearLevel' in data) || (data.yearLevel is string && data.yearLevel.size() <= 80)) &&
         (!('titleBadge' in data) || (data.titleBadge is string && data.titleBadge.size() <= 100)) &&
-        data.liveStatus in ['campus_otb', 'online_ready', 'in_lecture'] &&
+        data.liveStatus in ['campus_otb', 'online_ready', 'in_lecture', 'offline'] &&
         (!('bio' in data) || (data.bio is string && data.bio.size() <= 600)) &&
         (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 200000)) &&
         (!('coverPhotoUrl' in data) || (data.coverPhotoUrl is string && data.coverPhotoUrl.size() <= 220000)) &&

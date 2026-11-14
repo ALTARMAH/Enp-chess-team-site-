@@ -12,6 +12,7 @@ import {
 } from '../utils/clubData';
 import { MatchOutcome, MatchStakes, TimeControl, previewEloMatch } from '../utils/chessEngine';
 import { compressImageFile } from '../utils/imageUtils';
+import { IMG_ENP_TWILIGHT_BANNER, resolveAssetUrl } from '../utils/assetUrls';
 import {
   Camera,
   Swords,
@@ -348,7 +349,8 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
   const renderStatusText = (status: MemberLiveStatus) => {
     if (status === 'campus_otb') return 'On Campus OTB (Foyer / Library)';
     if (status === 'online_ready') return 'Online Ready for Challenge';
-    return 'In Lecture / Engineering Lab';
+    if (status === 'in_lecture') return 'In Lecture / Engineering Lab';
+    return 'Offline';
   };
 
   const renderRoleBadge = (role: ClubMember['role']) => {
@@ -513,6 +515,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
               <option value="campus_otb">On Campus OTB</option>
               <option value="online_ready">Online Ready</option>
               <option value="in_lecture">In Lecture</option>
+              <option value="offline">Offline</option>
             </select>
           </div>
         </div>
@@ -536,7 +539,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                   </span>
                   {m.avatarUrl ? (
                     <img
-                      src={m.avatarUrl}
+                      src={resolveAssetUrl(m.avatarUrl)}
                       alt={m.name}
                       referrerPolicy="no-referrer"
                       className="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0"
@@ -621,7 +624,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                       <div className="flex items-center gap-3">
                         {m.avatarUrl ? (
                           <img
-                            src={m.avatarUrl}
+                            src={resolveAssetUrl(m.avatarUrl)}
                             alt={m.name}
                             referrerPolicy="no-referrer"
                             className="w-9 h-9 rounded-full object-cover border border-white/20 shrink-0"
@@ -736,7 +739,9 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                         ? 'On Campus OTB'
                         : m.liveStatus === 'online_ready'
                         ? 'Online Ready'
-                        : 'In Lecture'}
+                        : m.liveStatus === 'in_lecture'
+                        ? 'In Lecture'
+                        : 'Offline'}
                     </td>
                     <td className="py-3 px-4 text-right">
                       <button
@@ -767,10 +772,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
         {/* Facebook-Style 16:9 Cover Photo Banner */}
         <div className="relative h-28 sm:h-60 w-full overflow-hidden bg-[#082556] border-b border-white/10">
           <img
-            src={
-              selectedMember.coverPhotoUrl ||
-              '/src/assets/images/enp_twilight_facade_banner_1794646311361.jpg'
-            }
+            src={resolveAssetUrl(selectedMember.coverPhotoUrl, IMG_ENP_TWILIGHT_BANNER)}
             alt={`${selectedMember.name} Cover Banner`}
             referrerPolicy="no-referrer"
             className="w-full h-full object-cover object-center opacity-90"
@@ -814,7 +816,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
               <div className="relative group shrink-0">
                 {selectedMember.avatarUrl ? (
                   <img
-                    src={selectedMember.avatarUrl}
+                    src={resolveAssetUrl(selectedMember.avatarUrl)}
                     alt={selectedMember.name}
                     referrerPolicy="no-referrer"
                     className="w-16 h-16 sm:w-32 sm:h-32 rounded-xl sm:rounded-2xl object-cover border-[3px] sm:border-4 border-[#061020] ring-2 ring-[#FF6B00] shadow-2xl bg-[#061020]"
@@ -939,6 +941,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                         { id: 'campus_otb', label: 'On Campus' },
                         { id: 'online_ready', label: 'Online' },
                         { id: 'in_lecture', label: 'In Class' },
+                        { id: 'offline', label: 'Offline' },
                       ] as const
                     ).map((st) => (
                       <button
@@ -1256,7 +1259,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
 
                 <div className="relative overflow-hidden rounded-2xl border border-[#26E6DE]/30 shadow-xl min-h-[126px] flex items-center">
                   <img
-                    src={RIVALRY_HEADER_BANNER_4K}
+                    src={resolveAssetUrl(RIVALRY_HEADER_BANNER_4K)}
                     alt="Garry Kasparov vs. Anatoly Karpov 1985 Rivalry Header"
                     referrerPolicy="no-referrer"
                     className="absolute inset-0 w-full h-full object-cover object-center opacity-75 pointer-events-none"
@@ -1467,7 +1470,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                       className="relative h-48 w-full overflow-hidden bg-[#08172E] cursor-pointer text-left"
                     >
                       <img
-                        src={photo.imageUrl}
+                        src={resolveAssetUrl(photo.imageUrl)}
                         alt={photo.caption}
                         referrerPolicy="no-referrer"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -1628,7 +1631,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
           >
             <div className="relative bg-black max-h-[70vh] flex items-center justify-center">
               <img
-                src={lightboxPhoto.imageUrl}
+                src={resolveAssetUrl(lightboxPhoto.imageUrl)}
                 alt={lightboxPhoto.caption}
                 referrerPolicy="no-referrer"
                 className="max-h-[70vh] w-auto object-contain"

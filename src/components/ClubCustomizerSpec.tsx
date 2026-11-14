@@ -13,6 +13,7 @@ import {
   UserRole,
 } from '../utils/clubData';
 import { compressImageFile } from '../utils/imageUtils';
+import { IMG_ENP_CREST_BANNER, IMG_ENP_SCHOOL_LOGO, resolveAssetUrl } from '../utils/assetUrls';
 import { ClubLogoBadge } from './ClubLogoBadge';
 import {
   Smartphone,
@@ -66,6 +67,7 @@ interface ClubCustomizerSpecProps {
   ) => Promise<{ ok: boolean; username: string; errorCode?: string; message: string }>;
   onUpdateMemberRole: (memberId: string, nextRole: UserRole) => void;
   onSyncClubToFirestore?: () => Promise<void>;
+  onResetRosterStatusesOffline?: () => Promise<void>;
   isCloudSynced?: boolean;
   onUpdateMemberRoleAndChessProfile?: (
     memberId: string,
@@ -129,6 +131,7 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
   onProvisionMemberLogin,
   onUpdateMemberRole,
   onSyncClubToFirestore,
+  onResetRosterStatusesOffline,
   isCloudSynced = false,
   onUpdateMemberRoleAndChessProfile,
   onDeleteMemberAccount,
@@ -260,7 +263,7 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
       chessComUsername: accChessCom.trim() || undefined,
       department: accDept.trim() || 'Polytechnic Engineering',
       yearLevel: accYear.trim() || 'Ingénieur',
-      liveStatus: 'campus_otb',
+      liveStatus: 'offline',
       role: isOwner ? accRole : 'member',
       clubRoleDivision: accDivision,
       chessSpecialty: accSpecialty,
@@ -437,6 +440,25 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
                   ? 'Re-Sync Cloud'
                   : 'Push to Cloud'}
               </span>
+            </button>
+          )}
+
+          {isAdminOrOwner && onResetRosterStatusesOffline && (
+            <button
+              type="button"
+              disabled={isSyncingCloud}
+              onClick={async () => {
+                setIsSyncingCloud(true);
+                try {
+                  await onResetRosterStatusesOffline();
+                  setAdminToast('Set all members to Offline & cleared stale live GPS pins.');
+                } finally {
+                  setIsSyncingCloud(false);
+                }
+              }}
+              className="min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 transition-colors bg-white/8 hover:bg-white/15 disabled:opacity-50 border border-white/15 text-slate-200 shadow-sm cursor-pointer"
+            >
+              <span>Set All Offline</span>
             </button>
           )}
 
@@ -1801,7 +1823,7 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
                 <div className="w-20 h-20 rounded-2xl bg-[#061020] border border-[#26E6DE]/35 flex items-center justify-center shadow-inner overflow-hidden">
                   {clubConfig.schoolLogoUrl && (
                     <img
-                      src={clubConfig.schoolLogoUrl}
+                      src={resolveAssetUrl(clubConfig.schoolLogoUrl, IMG_ENP_SCHOOL_LOGO)}
                       alt="Official School Logo"
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover scale-105"
@@ -1830,7 +1852,7 @@ export const ClubCustomizerSpec: React.FC<ClubCustomizerSpecProps> = ({
                 <div className="w-full h-20 rounded-xl bg-[#08224A] border border-[#26E6DE]/30 flex items-center justify-center overflow-hidden relative">
                   {clubConfig.clubBannerUrl && (
                     <img
-                      src={clubConfig.clubBannerUrl}
+                      src={resolveAssetUrl(clubConfig.clubBannerUrl, IMG_ENP_CREST_BANNER)}
                       alt="Official 16:9 Club Crest Banner"
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover"

@@ -22,6 +22,7 @@ import {
   query,
   where,
   writeBatch,
+  deleteField,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -159,5 +160,6 @@ export {
   query,
   where,
   writeBatch,
+  deleteField,
 };
 export type { User };

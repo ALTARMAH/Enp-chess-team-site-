@@ -4,6 +4,7 @@ import { parseFenBoard } from '../utils/chessEngine';
 import { ChessPieceSvg, playChessSound } from './ChessPieceSvg';
 import { ClubLogoBadge } from './ClubLogoBadge';
 import { compressImageFile } from '../utils/imageUtils';
+import { IMG_ENP_SCHOOL_LOGO, IMG_MIKHAIL_TAL_HERO, resolveAssetUrl } from '../utils/assetUrls';
 import { Zap, Play, Pause, SkipBack, SkipForward, Upload, Clock, Eye } from 'lucide-react';
 
 interface BroadcastHeroProps {
@@ -94,12 +95,18 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
       {/* Full-Bleed 16:9 Mikhail Tal Background Art */}
       <div className="relative w-full max-w-full min-w-0 min-h-[320px] sm:min-h-[540px] lg:min-h-[580px] flex flex-col justify-between p-2.5 sm:p-6 lg:p-8 overflow-hidden">
         <img
-          src={clubConfig.customHeroUrl || '/src/assets/images/mikhail_tal_brilliant_1794618787096.jpg'}
+          src={resolveAssetUrl(clubConfig.customHeroUrl, IMG_MIKHAIL_TAL_HERO)}
           alt="Mikhail Tal reaching from the shadows to play his 16. Nd5 Knight sacrifice in Bled 1965"
           referrerPolicy="no-referrer"
           className="absolute inset-0 w-full h-full object-cover object-center opacity-85 pointer-events-none select-none"
           onError={(e) => {
-            (e.currentTarget as HTMLImageElement).style.display = 'none';
+            const img = e.currentTarget as HTMLImageElement;
+            if (img.dataset.fallbackApplied !== '1') {
+              img.dataset.fallbackApplied = '1';
+              img.src = IMG_MIKHAIL_TAL_HERO;
+            } else {
+              img.style.display = 'none';
+            }
           }}
         />
 
@@ -124,7 +131,7 @@ export const BroadcastHero: React.FC<BroadcastHeroProps> = ({
               {clubConfig.schoolLogoUrl && (
                 <div className="hidden sm:flex w-10 h-10 rounded-xl bg-[#061020] border border-[#26E6DE]/35 shadow-sm items-center justify-center shrink-0 overflow-hidden">
                   <img
-                    src={clubConfig.schoolLogoUrl}
+                    src={resolveAssetUrl(clubConfig.schoolLogoUrl, IMG_ENP_SCHOOL_LOGO)}
                     alt={clubConfig.universityName}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover scale-105"

@@ -10,6 +10,7 @@ import {
   TimeControl,
   previewEloMatch,
 } from '../utils/chessEngine';
+import { resolveAssetUrl } from '../utils/assetUrls';
 import {
   MessageSquare,
   Hash,
@@ -432,7 +433,8 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
               {filteredDmContacts.map((m) => {
                 const isSelected = activeDmMemberId === m.id;
                 const isSameTeam = m.clubId === currentUser.clubId;
-                const isAvailable = m.liveStatus !== 'in_lecture';
+                const isAvailable =
+                  m.liveStatus === 'campus_otb' || m.liveStatus === 'online_ready';
                 return (
                   <button
                     key={m.id}
@@ -451,7 +453,7 @@ export const ClubChatHub: React.FC<ClubChatHubProps> = ({
                       >
                         {m.avatarUrl ? (
                           <img
-                            src={m.avatarUrl}
+                            src={resolveAssetUrl(m.avatarUrl)}
                             alt={m.name}
                             referrerPolicy="no-referrer"
                             className="w-full h-full object-cover"

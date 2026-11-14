@@ -5,6 +5,7 @@ import {
   ENP_CAMPUS_MEETUP_ZONES,
   EnpCampusMeetupZone,
 } from '../utils/clubData';
+import { resolveAssetUrl } from '../utils/assetUrls';
 import {
   APIProvider,
   Map as GoogleMap,
@@ -77,9 +78,7 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
     'idle' | 'requesting' | 'tracking' | 'denied'
   >('idle');
   const [gpsStatusMessage, setGpsStatusMessage] = useState<string>('');
-  const [activeInfoMarkerId, setActiveInfoMarkerId] = useState<string | null>(
-    'zone-jardins-library'
-  );
+  const [activeInfoMarkerId, setActiveInfoMarkerId] = useState<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
 
   const isAdminOrOwner = currentUser?.role === 'owner' || currentUser?.role === 'admin';
@@ -222,37 +221,24 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
     watchIdRef.current = id;
   };
 
-  // Compute coordinates ONLY for online / active campus members so only their floating pictures appear on the map
+  // Strictly show ONLY members who actually granted browser GPS permission (zero fabricated pins)
   const onlineMembersOnMap = members.filter(
     (m) =>
-      m.liveStatus === 'campus_otb' ||
-      m.liveStatus === 'online_ready' ||
-      Boolean(m.gpsLocation?.isLiveBrowserGps)
+      Boolean(m.gpsLocation?.isLiveBrowserGps) &&
+      typeof m.gpsLocation?.lat === 'number' &&
+      typeof m.gpsLocation?.lng === 'number'
   );
 
-  const memberMapPins = onlineMembersOnMap.map((m, idx) => {
+  const memberMapPins = onlineMembersOnMap.map((m) => {
     const zone = getZoneById(m.campusMeetupZoneId);
-    if (m.gpsLocation) {
-      return {
-        member: m,
-        lat: m.gpsLocation.lat,
-        lng: m.gpsLocation.lng,
-        zone,
-        isExactGps: Boolean(m.gpsLocation.isLiveBrowserGps),
-        accuracy: m.gpsLocation.accuracyMeters,
-        updatedAt: m.gpsLocation.updatedAt,
-      };
-    }
-    const angle = (idx * 137.5 * Math.PI) / 180;
-    const radius = 0.00014 * ((idx % 3) + 1);
     return {
       member: m,
-      lat: Number((zone.lat + Math.cos(angle) * radius).toFixed(6)),
-      lng: Number((zone.lng + Math.sin(angle) * radius).toFixed(6)),
+      lat: m.gpsLocation!.lat,
+      lng: m.gpsLocation!.lng,
       zone,
-      isExactGps: false,
-      accuracy: undefined,
-      updatedAt: 'Online on Campus',
+      isExactGps: true,
+      accuracy: m.gpsLocation!.accuracyMeters,
+      updatedAt: m.gpsLocation!.updatedAt,
     };
   });
 
@@ -384,10 +370,12 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
             <div>
               <span className="text-[9px] sm:text-[10px] font-mono-tabular uppercase text-[#FF6B00] font-bold flex items-center gap-1.5">
                 <Compass className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                LIVE CAMPUS GPS RADAR · {memberMapPins.length} ONLINE ON MAP
+                LIVE CAMPUS GPS RADAR · {memberMapPins.length} LIVE GPS ON MAP
               </span>
               <h3 className="text-xs sm:text-base font-bold text-white">
-                Online Members Live Positions (Tap Avatar to Challenge)
+                {memberMapPins.length > 0
+                  ? 'Live GPS Shared Positions (Tap Avatar to Challenge)'
+                  : 'Campus GPS Map (Waiting for Live GPS Opt-In)'}
               </h3>
             </div>
 
@@ -457,7 +445,7 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
                             >
                               {pin.member.avatarUrl ? (
                                 <img
-                                  src={pin.member.avatarUrl}
+                                  src={resolveAssetUrl(pin.member.avatarUrl)}
                                   alt={pin.member.name}
                                   referrerPolicy="no-referrer"
                                   className="w-full h-full object-cover"
@@ -490,7 +478,7 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
                               <div className="flex items-center gap-2">
                                 {pin.member.avatarUrl && (
                                   <img
-                                    src={pin.member.avatarUrl}
+                                    src={resolveAssetUrl(pin.member.avatarUrl)}
                                     alt={pin.member.name}
                                     referrerPolicy="no-referrer"
                                     className="w-8 h-8 rounded-full object-cover border border-slate-300 shrink-0"
@@ -593,7 +581,7 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
                       >
                         {pin.member.avatarUrl ? (
                           <img
-                            src={pin.member.avatarUrl}
+                            src={resolveAssetUrl(pin.member.avatarUrl)}
                             alt={pin.member.name}
                             referrerPolicy="no-referrer"
                             className="w-full h-full object-cover"
@@ -610,6 +598,13 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
                     </button>
                   );
                 })}
+
+                {memberMapPins.length === 0 && (
+                  <div className="pointer-events-none absolute inset-x-3 bottom-3 sm:inset-x-auto sm:left-4 sm:bottom-4 z-20 px-3 py-2 rounded-xl bg-[#061020]/90 border border-white/15 backdrop-blur-md text-[10px] sm:text-xs text-slate-300 max-w-sm">
+                    No members are sharing live GPS right now. Sign in and tap{' '}
+                    <span className="text-[#FF6B00] font-bold">Share Live GPS</span> to grant browser location permission and appear on the map.
+                  </div>
+                )}
 
                 {/* Tapped Member Details & Challenge Card */}
                 {selectedRadarPin && (
@@ -804,8 +799,10 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
                             <Wifi className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#26E6DE]" />
                             Online Ready
                           </>
+                        ) : m.liveStatus === 'in_lecture' ? (
+                          'In Lecture'
                         ) : (
-                          'Between Lectures'
+                          'Offline'
                         )}
                       </span>
 

@@ -9,6 +9,7 @@ import {
   previewEloMatch,
   describeEliminationStructure,
 } from '../utils/chessEngine';
+import { resolveAssetUrl } from '../utils/assetUrls';
 import {
   Trophy,
   PlusCircle,
@@ -1505,7 +1506,7 @@ export const TournamentManager: React.FC<TournamentManagerProps> = ({
                           <div className="relative shrink-0">
                             {winnerMember?.avatarUrl ? (
                               <img
-                                src={winnerMember.avatarUrl}
+                                src={resolveAssetUrl(winnerMember.avatarUrl)}
                                 alt={winnerRow.name}
                                 referrerPolicy="no-referrer"
                                 className="w-14 h-14 rounded-2xl object-cover border-2 border-[#F59E0B] shadow-lg"

@@ -40,6 +40,14 @@ import { ClubChatHub } from './components/ClubChatHub';
 import { ClubCustomizerSpec } from './components/ClubCustomizerSpec';
 import { ClubLogoBadge } from './components/ClubLogoBadge';
 import {
+  IMG_CHESS_MEMBERS_HALL_BG,
+  IMG_ENP_CLUB_LOGO,
+  IMG_ENP_CREST_BANNER,
+  IMG_ENP_SCHOOL_LOGO,
+  IMG_MIKHAIL_TAL_HERO,
+  resolveAssetUrl,
+} from './utils/assetUrls';
+import {
   auth,
   db,
   googleProvider,
@@ -61,6 +69,7 @@ import {
   query,
   where,
   writeBatch,
+  deleteField,
   User,
 } from './firebase';
 import {
@@ -100,6 +109,30 @@ export type SiteVisualTheme = 'dark' | 'light' | 'basic' | 'emerald';
 
 const STORAGE_KEY_THEME = 'enp_chess_club_theme_v4';
 const STORAGE_KEY_VISUAL_MODE = 'enp_chess_site_visual_theme_v1';
+
+function normalizeClubConfigAssets(c: ClubThemeConfig): ClubThemeConfig {
+  return {
+    ...c,
+    customLogoUrl: resolveAssetUrl(c.customLogoUrl, IMG_ENP_CLUB_LOGO),
+    schoolLogoUrl: resolveAssetUrl(c.schoolLogoUrl, IMG_ENP_SCHOOL_LOGO),
+    clubBannerUrl: resolveAssetUrl(c.clubBannerUrl, IMG_ENP_CREST_BANNER),
+    customHeroUrl: resolveAssetUrl(c.customHeroUrl, IMG_MIKHAIL_TAL_HERO),
+  };
+}
+
+function normalizeMemberAssets(m: ClubMember): ClubMember {
+  return {
+    ...m,
+    avatarUrl: m.avatarUrl ? resolveAssetUrl(m.avatarUrl) || undefined : undefined,
+    coverPhotoUrl: m.coverPhotoUrl
+      ? resolveAssetUrl(m.coverPhotoUrl) || undefined
+      : undefined,
+    profilePhotos: m.profilePhotos?.map((p) => ({
+      ...p,
+      imageUrl: resolveAssetUrl(p.imageUrl, p.imageUrl),
+    })),
+  };
+}
 
 const VISUAL_THEME_OPTIONS: {
   id: SiteVisualTheme;
@@ -199,7 +232,7 @@ export default function App() {
           return UNIVERSITY_PRESETS[0];
         }
 
-        return {
+        return normalizeClubConfigAssets({
           ...UNIVERSITY_PRESETS[0],
           ...parsed,
           customLogoUrl: isLegacyLogo
@@ -211,12 +244,12 @@ export default function App() {
           clubBannerUrl: isLegacyBanner
             ? UNIVERSITY_PRESETS[0].clubBannerUrl
             : parsed.clubBannerUrl,
-        };
+        });
       }
     } catch {
       // ignore storage error
     }
-    return UNIVERSITY_PRESETS[0];
+    return normalizeClubConfigAssets(UNIVERSITY_PRESETS[0]);
   });
 
   // Core Data State
@@ -241,6 +274,7 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState<string>('');
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
   const isSeedingRef = useRef<boolean>(false);
+  const legacyCloudMigratedRef = useRef<boolean>(false);
 
   // Quick Home Post Modal State (for Admins on Overview)
   const [isQuickPostModalOpen, setIsQuickPostModalOpen] = useState<boolean>(false);
@@ -461,14 +495,35 @@ export default function App() {
       clubsQ,
       (snapshot) => {
         if (!snapshot.empty) {
-          const cloudClubs = snapshot.docs.map((d) => d.data() as ClubThemeConfig);
+          const rawCloudClubs = snapshot.docs.map((d) => d.data() as ClubThemeConfig);
+          const cloudClubs = rawCloudClubs.map(normalizeClubConfigAssets);
           setClubs(cloudClubs);
+          const matchedActiveRaw = rawCloudClubs.find((c) => c.clubId === clubConfig.clubId);
           const matchedActive = cloudClubs.find((c) => c.clubId === clubConfig.clubId);
           setCloudClubExists(Boolean(matchedActive));
           if (matchedActive) {
             setClubConfig(matchedActive);
           }
           setIsCloudSynced(true);
+
+          // Automatically upgrade legacy `/src/assets/images/...` paths stored in Firestore when Owner connects
+          if (
+            matchedActiveRaw &&
+            matchedActiveRaw.customLogoUrl?.startsWith('/src/assets/') &&
+            !legacyCloudMigratedRef.current &&
+            auth.currentUser?.email?.toLowerCase() === 'fethallah2411@gmail.com' &&
+            auth.currentUser.emailVerified
+          ) {
+            legacyCloudMigratedRef.current = true;
+            setDoc(
+              doc(db, 'clubs', matchedActiveRaw.clubId),
+              stripUndefined({
+                ...matchedActive!,
+                updatedAt: new Date().toISOString(),
+              }),
+              { merge: true }
+            ).catch(() => {});
+          }
         }
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'clubs')
@@ -482,7 +537,7 @@ export default function App() {
       query(collection(db, `clubs/${cid}/members`), where('clubId', '==', cid)),
       (snapshot) => {
         if (!snapshot.empty || cloudClubExists) {
-          const loaded = snapshot.docs.map((d) => d.data() as ClubMember);
+          const loaded = snapshot.docs.map((d) => normalizeMemberAssets(d.data() as ClubMember));
           if (loaded.length > 0) {
             setMembers((prev) => [...prev.filter((m) => m.clubId !== cid), ...loaded]);
             setIsCloudSynced(true);
@@ -1444,7 +1499,7 @@ export default function App() {
       }) · Specialty: ${payload.chessSpecialty || 'Tactical All-Rounder'}.`,
       avatarInitials: initials || 'CM',
       avatarColor: clubConfig.accentColor,
-      coverPhotoUrl: '/src/assets/images/chess_members_hall_bg_1794624757745.jpg',
+      coverPhotoUrl: IMG_CHESS_MEMBERS_HALL_BG,
       profilePhotos: [],
       joinedDate: 'Nov 2026',
       fide: {
@@ -1839,7 +1894,7 @@ export default function App() {
     });
   };
 
-  const handleUpdateMemberGps = (
+  const handleUpdateMemberGps = async (
     memberId: string,
     gps: ClubMember['gpsLocation'] | null
   ) => {
@@ -1856,10 +1911,56 @@ export default function App() {
       gpsLocation: gps || undefined,
     };
     setMembers((prev) => prev.map((m) => (m.id === memberId ? updated : m)));
-    syncDocToFirestore(`clubs/${updated.clubId}/members`, updated.id, {
-      ...updated,
-      updatedAt: new Date().toISOString(),
-    });
+    if (!auth.currentUser) return;
+    try {
+      const cleanData = stripUndefined({
+        ...updated,
+        updatedAt: new Date().toISOString(),
+      }) as Record<string, unknown>;
+      if (!gps) {
+        cleanData.gpsLocation = deleteField();
+      }
+      await setDoc(doc(db, `clubs/${updated.clubId}/members`, updated.id), cleanData, {
+        merge: true,
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `clubs/${updated.clubId}/members/${updated.id}`);
+    }
+  };
+
+  const handleResetRosterStatusesOffline = async () => {
+    if (!isAdminOrOwner) return;
+    const targetClubId = clubConfig.clubId;
+    const now = new Date().toISOString();
+    setMembers((prev) =>
+      prev.map((m) =>
+        m.clubId === targetClubId
+          ? { ...m, liveStatus: 'offline', gpsLocation: undefined }
+          : m
+      )
+    );
+    if (!auth.currentUser) return;
+    try {
+      const scoped = members.filter((m) => m.clubId === targetClubId);
+      for (let i = 0; i < scoped.length; i += 350) {
+        const batch = writeBatch(db);
+        const chunk = scoped.slice(i, i + 350);
+        chunk.forEach((m) => {
+          batch.set(
+            doc(db, `clubs/${targetClubId}/members`, m.id),
+            {
+              liveStatus: 'offline',
+              gpsLocation: deleteField(),
+              updatedAt: now,
+            },
+            { merge: true }
+          );
+        });
+        await batch.commit();
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `clubs/${targetClubId}/members`);
+    }
   };
 
   // --- HOME SCREEN POSTS HANDLERS ---
@@ -1912,7 +2013,7 @@ export default function App() {
       bio: `Founding captain of ${newClub.clubName} (${newClub.universityName}).`,
       avatarInitials: newClub.clubName.slice(0, 2).toUpperCase(),
       avatarColor: newClub.accentColor,
-      coverPhotoUrl: '/src/assets/images/chess_members_hall_bg_1794624757745.jpg',
+      coverPhotoUrl: IMG_CHESS_MEMBERS_HALL_BG,
       profilePhotos: [],
       joinedDate: 'Nov 2026',
       fide: {
@@ -2143,8 +2244,8 @@ export default function App() {
           <img
             src={
               activeModule === 'overview'
-                ? clubConfig.customHeroUrl || activeModuleBg.imageUrl
-                : activeModuleBg.imageUrl
+                ? resolveAssetUrl(clubConfig.customHeroUrl || activeModuleBg.imageUrl, IMG_MIKHAIL_TAL_HERO)
+                : resolveAssetUrl(activeModuleBg.imageUrl, IMG_MIKHAIL_TAL_HERO)
             }
             alt=""
             referrerPolicy="no-referrer"
@@ -2223,7 +2324,7 @@ export default function App() {
               {clubConfig.schoolLogoUrl && (
                 <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-[#061020] border border-[#26E6DE]/35 shadow-sm flex items-center justify-center shrink-0 overflow-hidden">
                   <img
-                    src={clubConfig.schoolLogoUrl}
+                    src={resolveAssetUrl(clubConfig.schoolLogoUrl, IMG_ENP_SCHOOL_LOGO)}
                     alt={clubConfig.universityName}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover scale-105"
@@ -2297,7 +2398,7 @@ export default function App() {
                   {clubConfig.clubBannerUrl && (
                     <div className="rounded-xl overflow-hidden border border-[#26E6DE]/25 shadow-lg bg-gradient-to-b from-[#0A2552] to-[#061020] p-1 flex items-center justify-center max-w-full">
                       <img
-                        src={clubConfig.clubBannerUrl}
+                        src={resolveAssetUrl(clubConfig.clubBannerUrl, IMG_ENP_CREST_BANNER)}
                         alt={`${clubConfig.clubName} Official Crest Banner`}
                         referrerPolicy="no-referrer"
                         className="w-full h-24 object-cover rounded-lg"
@@ -2501,7 +2602,7 @@ export default function App() {
               {activeModule !== 'overview' && !showHeroInWorkspace && (
                 <div className="relative w-full max-w-full min-w-0 h-24 sm:h-52 lg:h-60 rounded-2xl sm:rounded-3xl overflow-hidden border border-white/15 shadow-2xl flex flex-col justify-end p-3 sm:p-7">
                   <img
-                    src={activeModuleBg.imageUrl}
+                    src={resolveAssetUrl(activeModuleBg.imageUrl, IMG_MIKHAIL_TAL_HERO)}
                     alt={activeModuleBg.title}
                     referrerPolicy="no-referrer"
                     className="absolute inset-0 w-full h-full object-cover object-center opacity-85 pointer-events-none"
@@ -2579,7 +2680,7 @@ export default function App() {
                             {clubConfig.schoolLogoUrl && (
                               <div className="w-9 h-9 rounded-xl bg-[#061020] border border-[#26E6DE]/35 flex items-center justify-center overflow-hidden">
                                 <img
-                                  src={clubConfig.schoolLogoUrl}
+                                  src={resolveAssetUrl(clubConfig.schoolLogoUrl, IMG_ENP_SCHOOL_LOGO)}
                                   alt="École Nationale Polytechnique Logo"
                                   referrerPolicy="no-referrer"
                                   className="w-full h-full object-cover scale-105"
@@ -3010,6 +3111,7 @@ export default function App() {
                   onProvisionMemberLogin={handleProvisionMemberLogin}
                   onUpdateMemberRole={handleUpdateMemberRole}
                   onSyncClubToFirestore={seedClubToFirestore}
+                  onResetRosterStatusesOffline={handleResetRosterStatusesOffline}
                   isCloudSynced={isCloudSynced}
                   onUpdateMemberRoleAndChessProfile={handleUpdateMemberRoleAndChessProfile}
                   onDeleteMemberAccount={handleDeleteMemberAccount}

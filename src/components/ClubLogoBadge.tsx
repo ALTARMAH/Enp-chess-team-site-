@@ -1,11 +1,14 @@
 import React from 'react';
+import {
+  IMG_ENP_CLUB_LOGO,
+  IMG_ENP_CREST_BANNER,
+  IMG_ENP_SCHOOL_LOGO,
+  resolveAssetUrl,
+} from '../utils/assetUrls';
 
-export const EDITED_ENP_CLUB_LOGO_URL =
-  '/src/assets/images/enp_club_logo_edited_1794647762806.jpg';
-export const EDITED_ENP_SCHOOL_LOGO_URL =
-  '/src/assets/images/enp_school_logo_edited_1794647764981.jpg';
-export const EDITED_ENP_CREST_BANNER_URL =
-  '/src/assets/images/enp_club_crest_banner_edited_1794647765914.jpg';
+export const EDITED_ENP_CLUB_LOGO_URL = IMG_ENP_CLUB_LOGO;
+export const EDITED_ENP_SCHOOL_LOGO_URL = IMG_ENP_SCHOOL_LOGO;
+export const EDITED_ENP_CREST_BANNER_URL = IMG_ENP_CREST_BANNER;
 
 interface ClubLogoBadgeProps {
   clubId?: string;
@@ -31,16 +34,7 @@ export const ClubLogoBadge: React.FC<ClubLogoBadgeProps> = ({
     xl: 'w-20 h-20 rounded-2xl',
   }[size];
 
-  const isLegacyUneditedLogo = Boolean(
-    !customLogoUrl ||
-      customLogoUrl.includes('image_86d0bd89') ||
-      customLogoUrl.includes('image_0e881c10') ||
-      customLogoUrl.includes('image_939bef2c')
-  );
-
-  const resolvedSrc = isLegacyUneditedLogo
-    ? EDITED_ENP_CLUB_LOGO_URL
-    : customLogoUrl!;
+  const resolvedSrc = resolveAssetUrl(customLogoUrl, IMG_ENP_CLUB_LOGO);
 
   return (
     <div
