@@ -173,7 +173,6 @@ export default function App() {
   const [activeModule, setActiveModule] = useState<ActiveModule>('overview');
   const [showHeroInWorkspace, setShowHeroInWorkspace] = useState<boolean>(false);
   const [androidPreviewMode, setAndroidPreviewMode] = useState<boolean>(false);
-  const [quotaExceeded, setQuotaExceeded] = useState<boolean>(false);
   const [siteTheme, setSiteTheme] = useState<SiteVisualTheme>(() => {
     try {
       const savedMode = localStorage.getItem(STORAGE_KEY_VISUAL_MODE) as SiteVisualTheme | null;
@@ -205,12 +204,6 @@ export default function App() {
       // ignore
     }
   }, [siteTheme]);
-
-  useEffect(() => {
-    const onQuota = () => setQuotaExceeded(true);
-    window.addEventListener('gmp-quota-exceeded', onQuota);
-    return () => window.removeEventListener('gmp-quota-exceeded', onQuota);
-  }, []);
 
   // Multi-Club State
   const [clubs, setClubs] = useState<ClubThemeConfig[]>(UNIVERSITY_PRESETS);
@@ -2486,25 +2479,6 @@ export default function App() {
             : 'flex-1 flex flex-col relative z-10 min-w-0 w-full max-w-full overflow-x-hidden'
         }
       >
-        {quotaExceeded && (
-          <div
-            role="alert"
-            className="sticky top-0 z-50 flex items-center justify-between gap-4 border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900"
-          >
-            <span>
-              <strong>Google Maps:</strong> Demo key quota reached — map tiles or data may not load. Replace it with your own API key in AI Studio settings to restore full functionality.
-            </span>
-            <a
-              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 font-medium underline hover:text-amber-700"
-            >
-              Learn how
-            </a>
-          </div>
-        )}
-
         {/* 3-ZONE TOP BAR CONTRACT */}
         <header className="sticky top-0 z-30 bg-[#061020]/90 theme-header-surface backdrop-blur-xl border-b border-white/10 px-2.5 sm:px-6 py-1.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-6 w-full max-w-full min-w-0 overflow-hidden">
           {/* Zone 1: Brand Logos (Minimalist Text-Free Emblem) & Active Club Name */}

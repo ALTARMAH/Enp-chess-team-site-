@@ -5,11 +5,17 @@ import './index.css';
 declare global {
   interface Window {
     gm_authFailure?: () => void;
+    __enpGmpFailed?: boolean;
   }
 }
 
+const triggerGmpFallback = () => {
+  window.__enpGmpFailed = true;
+  window.dispatchEvent(new CustomEvent('gmp-map-fallback'));
+};
+
 window.gm_authFailure = () => {
-  window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+  triggerGmpFallback();
 };
 
 const _origConsoleError = console.error;
@@ -24,16 +30,16 @@ console.error = (...args: unknown[]) => {
   ) {
     return;
   }
+  const joined = args.map((a) => String(a)).join(' ');
   if (
-    args.some(
-      (a) =>
-        typeof a === 'string' &&
-        (a.includes('OverQuotaMapError') ||
-          a.includes('RESOURCE_EXHAUSTED') ||
-          a.includes('quota'))
-    )
+    joined.includes('OverQuotaMapError') ||
+    joined.includes('BillingNotEnabledMapError') ||
+    joined.includes('ApiNotActivatedMapError') ||
+    joined.includes('RefererNotAllowedMapError') ||
+    joined.includes('InvalidKeyMapError') ||
+    joined.includes('Google Maps JavaScript API error')
   ) {
-    window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+    triggerGmpFallback();
   }
   _origConsoleError.apply(console, args);
 };

@@ -102,7 +102,16 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
   const [gpsStatusMessage, setGpsStatusMessage] = useState<string>('');
   const [activeInfoMarkerId, setActiveInfoMarkerId] = useState<string | null>(null);
   const [mapLayerMode, setMapLayerMode] = useState<CampusMapLayerMode>('satellite');
+  const [googleMapsFailed, setGoogleMapsFailed] = useState<boolean>(() =>
+    Boolean((window as unknown as { __enpGmpFailed?: boolean }).__enpGmpFailed)
+  );
   const watchIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const onFallback = () => setGoogleMapsFailed(true);
+    window.addEventListener('gmp-map-fallback', onFallback);
+    return () => window.removeEventListener('gmp-map-fallback', onFallback);
+  }, []);
 
   const isAdminOrOwner = currentUser?.role === 'owner' || currentUser?.role === 'admin';
   const hasActivePin =
@@ -656,9 +665,14 @@ export const FreeHourRadar: React.FC<FreeHourRadarProps> = ({
           )}
 
           <div className="relative w-full h-[300px] sm:h-[460px] bg-[#040B16] overflow-hidden">
-            {MAPS_API_KEY ? (
+            {MAPS_API_KEY && !googleMapsFailed ? (
               <div className="relative w-full h-full">
-                <APIProvider apiKey={MAPS_API_KEY} region="DZ" language="en">
+                <APIProvider
+                  apiKey={MAPS_API_KEY}
+                  region="DZ"
+                  language="en"
+                  onError={() => setGoogleMapsFailed(true)}
+                >
                   <GoogleMap
                     defaultCenter={ENP_CAMPUS_CENTER}
                     defaultZoom={17}
